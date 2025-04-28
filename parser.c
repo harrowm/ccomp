@@ -1,3 +1,9 @@
+/*
+ * File: parser.c
+ * Description: Implements the parser for constructing an Abstract Syntax Tree (AST).
+ * Purpose: Analyzes token streams and builds a structured representation of the source code.
+ */
+
 #include "ast.h"
 #include "lexer.h"
 #include "debug.h"
@@ -133,7 +139,16 @@ ASTNode* create_literal_node(int value, Type *type) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_LITERAL;
-    node->data.literal.value = value;
+    node->data.literal.value.int_value = value;
+    node->data.literal.type = type;
+    return node;
+}
+
+ASTNode *create_literal_node_with_ptr(void *ptr, Type *type) {
+    ASTNode *node = malloc(sizeof(ASTNode));
+    if (!node) return NULL;
+    node->type = NODE_LITERAL;
+    node->data.literal.value.ptr_value = ptr;
     node->data.literal.type = type;
     return node;
 }
@@ -238,8 +253,52 @@ static ASTNode* parse_primary(Parser *parser) {
         return create_literal_node(value, create_type(TYPE_INT));
     }
 
+    if (match(parser, TOK_STRING)) {
+        char *value = strndup(parser->previous.text, parser->previous.length);
+        return create_literal_node_with_ptr(value, create_type(TYPE_POINTER));
+    }
+
     if (match(parser, TOK_IDENTIFIER)) {
         char *name = strndup(parser->previous.text, parser->previous.length);
+
+        // Check for function call
+        if (match(parser, TOK_LPAREN)) {
+            // Parse arguments
+            ASTNode **args = NULL;
+            size_t arg_count = 0;
+            size_t arg_capacity = 0;
+
+            if (!check(parser, TOK_RPAREN)) {
+                do {
+                    if (arg_count >= arg_capacity) {
+                        arg_capacity = arg_capacity == 0 ? 4 : arg_capacity * 2;
+                        args = realloc(args, sizeof(ASTNode *) * arg_capacity);
+                        if (!args) {
+                            LOG_ERROR("Memory allocation failed");
+                            return NULL;
+                        }
+                    }
+
+                    ASTNode *arg = parse_expression(parser);
+                    if (!arg) break;
+
+                    args[arg_count++] = arg;
+                } while (match(parser, TOK_COMMA));
+            }
+
+            consume(parser, TOK_RPAREN, "Expect ')' after function arguments.");
+
+            // Create function call node
+            ASTNode *call_node = malloc(sizeof(ASTNode));
+            if (!call_node) return NULL;
+            call_node->type = NODE_FUNCTION_CALL;
+            call_node->data.function_call.name = name;
+            call_node->data.function_call.args = args;
+            call_node->data.function_call.arg_count = arg_count;
+            return call_node;
+        }
+
+        // Otherwise, it's a variable reference
         return create_var_ref_node(name, NULL); // Type will be resolved later
     }
     
@@ -555,7 +614,7 @@ static ASTNode* parse_parameter(Parser *parser) {
             // Array with specified size
             ASTNode *size_expr = parse_expression(parser);
             if (size_expr && size_expr->type == NODE_LITERAL) {
-                Type *array_type = create_array_type(type, size_expr->data.literal.value);
+                Type *array_type = create_array_type(type, size_expr->data.literal.value.int_value);
                 consume(parser, TOK_RBRACKET, "Expect ']' after array size.");
                 return create_var_decl_node(name, array_type, NULL);
             } else {
@@ -763,6 +822,15 @@ void free_ast(ASTNode *node) {
             }
             free(node->data.stmt_list.stmts);
             break;
+
+        case NODE_FUNCTION_CALL:
+            free(node->data.function_call.name);
+            for (size_t i = 0; i < node->data.function_call.arg_count; i++) {
+                free_ast(node->data.function_call.args[i]);
+            }
+            free(node->data.function_call.args);
+            break;
+
         case INVALID_NODE_TYPE:
         case UNKNOWN_NODE_TYPE:
             LOG_ERROR("Invalid or unknown node type encountered during AST cleanup\n");
@@ -788,7 +856,8 @@ const char *node_type_to_string(NodeType type) {
         [NODE_TYPE_SPECIFIER] = "TYPE_SPECIFIER",
         [NODE_IF_STMT] = "IF_STMT",
         [NODE_WHILE_STMT] = "WHILE_STMT",
-        [NODE_FOR_STMT] = "FOR_STMT"
+        [NODE_FOR_STMT] = "FOR_STMT",
+        [NODE_FUNCTION_CALL] = "FUNCTION_CALL"
     };
 
     // Handle invalid type values
@@ -861,7 +930,11 @@ void print_ast(ASTNode *node, int indent) {
             break;
 
         case NODE_LITERAL:
-            printf("Literal: %d\n", node->data.literal.value);
+            if (node->data.literal.type->kind == TYPE_POINTER) {
+                printf("Literal (pointer): %p\n", node->data.literal.value.ptr_value);
+            } else {
+                printf("Literal: %d\n", node->data.literal.value.int_value);
+            }
             break;
     
         case NODE_VAR_REF:
@@ -959,6 +1032,13 @@ void print_ast(ASTNode *node, int indent) {
                     print_ast(create_type_spec_node(node->data.type_spec.type->base), 0);
                     break;
                 default: printf("unknown\n"); break;
+            }
+            break;
+
+        case NODE_FUNCTION_CALL:
+            printf("FunctionCall: %s\n", node->data.function_call.name);
+            for (size_t i = 0; i < node->data.function_call.arg_count; i++) {
+                print_ast(node->data.function_call.args[i], indent + 1);
             }
             break;
             

@@ -1,4 +1,10 @@
 // cfg.h
+/*
+ * File: cfg.h
+ * Description: Declares the structures and functions for Control Flow Graph (CFG) management.
+ * Purpose: Provides an interface for constructing and analyzing CFGs.
+ */
+
 #ifndef CFG_H
 #define CFG_H
 
@@ -6,6 +12,17 @@
 #include "debug.h"
 #include <stdbool.h>
 #include <stdlib.h>
+
+// Forward declarations to resolve circular dependencies
+struct BasicBlock;
+struct CFG;
+
+// Structure to represent dominance frontiers
+typedef struct DominanceFrontier {
+    struct BasicBlock **blocks; // Array of blocks in the dominance frontier
+    size_t count;       // Number of blocks in the frontier
+    size_t capacity;    // Capacity of the array
+} DominanceFrontier;
 
 typedef enum {
     BLOCK_NORMAL,
@@ -34,7 +51,7 @@ typedef struct BasicBlock {
     
     // For dominance calculations
     struct BasicBlock *dominator;
-    struct BasicBlock **dom_frontier;
+    DominanceFrontier *dom_frontier; // Pointer to the dominance frontier structure
     size_t df_count;
     size_t df_capacity;
 } BasicBlock;
@@ -42,7 +59,7 @@ typedef struct BasicBlock {
 typedef struct {
     BasicBlock *entry;
     BasicBlock *exit;
-    BasicBlock **blocks;
+    BasicBlock **blocks; // the dominance frontier
     size_t block_count;
     size_t block_capacity;
 } CFG;
@@ -52,4 +69,10 @@ void free_cfg(CFG *cfg);
 void print_cfg(CFG *cfg, FILE *stream);
 void generate_dot_file(CFG *cfg, const char *filename);
 
+// Function declarations for dominance frontiers
+void compute_dominance_frontiers(CFG *cfg);
+void free_dominance_frontiers(CFG *cfg);
+void generate_dominance_frontiers_dot(CFG *cfg, const char *filename);
+void print_dominance_frontiers(CFG *cfg, FILE *stream);
+void compute_dominator_tree(CFG *cfg);
 #endif // CFG_H

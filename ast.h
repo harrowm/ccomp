@@ -1,3 +1,9 @@
+/*
+ * File: ast.h
+ * Description: Defines the Abstract Syntax Tree (AST) structure and related functions.
+ * Purpose: Used to represent the structure of the parsed source code in memory.
+ */
+
 #ifndef AST_H
 #define AST_H
 
@@ -20,6 +26,7 @@ typedef enum {
     NODE_WHILE_STMT,
     NODE_FOR_STMT,
     NODE_UNARY_OP, // For unary operations like --, ++, etc.
+    NODE_FUNCTION_CALL, // For function calls like foo(a, b)
     INVALID_NODE_TYPE,
     UNKNOWN_NODE_TYPE
 } NodeType;
@@ -38,12 +45,17 @@ typedef struct Type {
     size_t array_size; // For array types
 } Type;
 
+typedef union {
+    int int_value;
+    void *ptr_value;
+} LiteralValue;
+
 typedef struct ASTNode {
     NodeType type;
     union {
         // Literal value
         struct {
-            int value;
+            LiteralValue value;
             Type *type;
         } literal;
 
@@ -109,6 +121,13 @@ typedef struct ASTNode {
             struct ASTNode *body;
         } function_decl;
         
+        // Function call
+        struct {
+            char *name; // Function name
+            struct ASTNode **args; // Array of argument expressions
+            size_t arg_count; // Number of arguments
+        } function_call;
+
         // Return statement
         struct {
             struct ASTNode *value;

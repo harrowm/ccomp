@@ -1,3 +1,9 @@
+/*
+ * File: main.c
+ * Description: Entry point for the compiler program.
+ * Purpose: Orchestrates the compilation process by invoking various components.
+ */
+
 #include "lexer.h"
 #include "ast.h"
 #include "cfg.h"
@@ -80,6 +86,17 @@ int main(int argc, char *argv[]) {
 
     generate_dot_file(cfg, "cfg.dot");
     printf("Control Flow Graph saved to cfg.dot\n");
+
+    // Compute the dominator tree
+    printf("\nComputing Dominator Tree...\n");
+    compute_dominator_tree(cfg);
+    printf("Dominator Tree computed successfully.\n");
+
+    // Compute dominance frontiers
+    printf("\nComputing Dominance Frontiers...\n");
+    compute_dominance_frontiers(cfg);
+    generate_dominance_frontiers_dot(cfg, "df.dot");
+    printf("Dominance Frontiers saved to df.dot\n");
         
     // Clean up
     printf("\nCleaning up ...\n");

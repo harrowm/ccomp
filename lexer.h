@@ -1,3 +1,9 @@
+/*
+ * File: lexer.h
+ * Description: Declares the structures and functions for lexical analysis.
+ * Purpose: Provides an interface for tokenizing source code.
+ */
+
 // Missing fro token types are:
 // - constexpr
 // - attribute types [[fallthrough]] etc

@@ -1,3 +1,9 @@
+/*
+ * File: test.c
+ * Description: Contains test cases for validating the compiler components.
+ * Purpose: Ensures the correctness and reliability of the implemented features.
+ */
+
 int main(int argc, char *argv[])
 {
     int a = 8;

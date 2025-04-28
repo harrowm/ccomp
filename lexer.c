@@ -1,3 +1,9 @@
+/*
+ * File: lexer.c
+ * Description: Implements the lexical analyzer for tokenizing source code.
+ * Purpose: Converts source code into a stream of tokens for parsing.
+ */
+
 #include "lexer.h"
 #include "debug.h"
 #include <stdio.h>

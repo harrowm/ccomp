@@ -2,125 +2,29 @@ digraph CFG {
   node [shape=box];
   Block0 [label="Block 0\nType: Entry Block\nStmt 0: VarDecl: x
   Initializer:
-    Literal: 5
+    Literal: 0
 \nStmt 1: VarDecl: y
   Initializer:
-    Literal: 10
-\nStmt 2: VarDecl: z
-  Initializer:
-    Literal: 0
-\nStmt 3: BinaryOp: LT
+    Literal: 1
+\nStmt 2: BinaryOp: LT
   Left:
     VarRef: x
-  Right:
-    VarRef: y
-"];
-  Block1 [label="Block 1\nType: Exit Block"];
-  Block2 [label="Block 2\nType: If-Then Block\nStmt 0: BinaryOp: EQ
-  Left:
-    VarRef: z
-  Right:
-    BinaryOp: PLUS
-    Left:
-        VarRef: x
-    Right:
-        VarRef: y
-"];
-  Block3 [label="Block 3\nType: If-Else Block\nStmt 0: BinaryOp: EQ
-  Left:
-    VarRef: z
-  Right:
-    BinaryOp: MINUS
-    Left:
-        VarRef: x
-    Right:
-        VarRef: y
-"];
-  Block4 [label="Block 4\nType: Normal Block"];
-  Block5 [label="Block 5\nType: Loop Header Block\nStmt 0: BinaryOp: GT
-  Left:
-    VarRef: z
-  Right:
-    Literal: 0
-"];
-  Block6 [label="Block 6\nType: Loop Body Block\nStmt 0: UnaryOp: DECREMENT (postfix)
-  VarRef: z
-"];
-  Block7 [label="Block 7\nType: Normal Block\nStmt 0: VarDecl: i
-  Initializer:
-    Literal: 0
-"];
-  Block8 [label="Block 8\nType: Loop Header Block\nStmt 0: BinaryOp: LT
-  Left:
-    VarRef: i
   Right:
     Literal: 5
 "];
-  Block9 [label="Block 9\nType: Loop Body Block\nStmt 0: BinaryOp: PLUS_EQ
-  Left:
-    VarRef: x
-  Right:
-    VarRef: i
-\nStmt 1: UnaryOp: INCREMENT (postfix)
-  VarRef: i
+  Block1 [label="Block 1\nType: Exit Block"];
+  Block2 [label="Block 2\nType: If-Then Block\nStmt 0: UnaryOp: INCREMENT (postfix)
+  VarRef: x
 "];
-  Block10 [label="Block 10\nType: Normal Block\nStmt 0: BinaryOp: GT
-  Left:
-    VarRef: x
-  Right:
-    Literal: 10
-"];
-  Block11 [label="Block 11\nType: If-Then Block\nStmt 0: VarDecl: j
-  Initializer:
-    Literal: 0
-"];
-  Block12 [label="Block 12\nType: If-Else Block"];
-  Block13 [label="Block 13\nType: Normal Block\nStmt 0: Return
-  Literal: 0
-"];
-  Block14 [label="Block 14\nType: Loop Header Block\nStmt 0: BinaryOp: LT
-  Left:
-    VarRef: j
-  Right:
-    Literal: 3
-"];
-  Block15 [label="Block 15\nType: Loop Body Block"];
-  Block16 [label="Block 16\nType: Normal Block"];
-  Block17 [label="Block 17\nType: Loop Header Block\nStmt 0: BinaryOp: LT
-  Left:
-    VarRef: y
-  Right:
-    Literal: 20
-"];
-  Block18 [label="Block 18\nType: Loop Body Block\nStmt 0: UnaryOp: INCREMENT (postfix)
+  Block3 [label="Block 3\nType: If-Else Block"];
+  Block4 [label="Block 4\nType: Normal Block\nStmt 0: UnaryOp: INCREMENT (postfix)
   VarRef: y
-"];
-  Block19 [label="Block 19\nType: Normal Block\nStmt 0: UnaryOp: INCREMENT (postfix)
-  VarRef: j
+\nStmt 1: Return
+  Literal: 0
 "];
   Block0 -> Block2;
   Block0 -> Block3;
   Block2 -> Block4;
   Block3 -> Block4;
-  Block4 -> Block5;
-  Block5 -> Block6;
-  Block5 -> Block7;
-  Block6 -> Block5;
-  Block7 -> Block8;
-  Block8 -> Block9;
-  Block8 -> Block10;
-  Block9 -> Block8;
-  Block10 -> Block11;
-  Block10 -> Block12;
-  Block11 -> Block14;
-  Block12 -> Block13;
-  Block13 -> Block1;
-  Block14 -> Block15;
-  Block14 -> Block16;
-  Block15 -> Block17;
-  Block16 -> Block13;
-  Block17 -> Block18;
-  Block17 -> Block19;
-  Block18 -> Block17;
-  Block19 -> Block14;
+  Block4 -> Block1;
 }

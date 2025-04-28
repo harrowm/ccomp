@@ -1,3 +1,9 @@
+/*
+ * File: cfg.c
+ * Description: Implements the Control Flow Graph (CFG) construction and manipulation.
+ * Purpose: Used to represent and analyze the flow of control in a program.
+ */
+
 // cfg.c
 #include "cfg.h"
 #include "ast.h"
@@ -255,6 +261,60 @@ CFG* ast_to_cfg(ASTNode *ast) {
     return cfg;
 }
 
+// Function to compute the dominator tree for the CFG
+void compute_dominator_tree(CFG *cfg) {
+    if (!cfg || !cfg->entry) {
+        LOG_ERROR("Invalid CFG or entry block");
+        return;
+    }
+
+    // Initialize dominators
+    for (size_t i = 0; i < cfg->block_count; i++) {
+        cfg->blocks[i]->dominator = NULL;
+    }
+    cfg->entry->dominator = cfg->entry; // Entry block dominates itself
+
+    bool changed;
+    do {
+        changed = false;
+
+        for (size_t i = 0; i < cfg->block_count; i++) {
+            BasicBlock *block = cfg->blocks[i];
+            if (block == cfg->entry) continue; // Skip the entry block
+
+            BasicBlock *new_idom = NULL;
+            for (size_t j = 0; j < block->pred_count; j++) {
+                BasicBlock *pred = block->preds[j];
+                if (pred->dominator) {
+                    if (!new_idom) {
+                        new_idom = pred;
+                    } else {
+                        // Intersect dominators
+                        BasicBlock *finger1 = pred;
+                        BasicBlock *finger2 = new_idom;
+                        while (finger1 != finger2) {
+                            while (finger1 && finger1->id > finger2->id) {
+                                finger1 = finger1->dominator;
+                            }
+                            while (finger2 && finger2->id > finger1->id) {
+                                finger2 = finger2->dominator;
+                            }
+                        }
+                        new_idom = finger1;
+                    }
+                }
+            }
+
+            if (block->dominator != new_idom) {
+                block->dominator = new_idom;
+                changed = true;
+            }
+        }
+    } while (changed);
+
+    LOG_INFO("Dominator tree computed successfully");
+}
+
 void free_cfg(CFG *cfg) {
     if (!cfg) {
         LOG_ERROR("NULL CFG pointer");
@@ -346,7 +406,11 @@ void print_ast_to_stream(ASTNode *node, int indent, FILE *stream) {
             break;
 
         case NODE_LITERAL:
-            fprintf(stream, "Literal: %d\n", node->data.literal.value);
+            if (node->data.literal.type->kind == TYPE_POINTER) {
+                fprintf(stream, "Literal (pointer): %p\n", node->data.literal.value.ptr_value);
+            } else {
+                fprintf(stream, "Literal: %d\n", node->data.literal.value.int_value);
+            }
             break;
 
         case NODE_VAR_REF:
