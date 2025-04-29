@@ -1,0 +1,24 @@
+name: Lexer Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: sudo apt-get install -y build-essential
+
+      - name: Build lexer tests
+        run: make test_lexer
+
+      - name: Run lexer tests
+        run: make test
