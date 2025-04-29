@@ -279,15 +279,36 @@ static Token lex_comment(Lexer* lexer) {
 }
 
 Token next_token(Lexer* lexer) {
-    while (isspace(*lexer->current)) advance(lexer);
-    
+    LOG_INFO("Starting next_token: current char='%c' (line=%u, column=%u)", *lexer->current, lexer->line, lexer->column);
+
+    while (isspace(*lexer->current)) {
+        LOG_INFO("Skipping whitespace: '%c'", *lexer->current);
+        advance(lexer);
+    }
+
     const char* start = lexer->current;
-    
-    if (*lexer->current == '\0') return make_token(lexer, TOK_EOF, start, 0);
-    
-    if (isalpha(*lexer->current) || *lexer->current == '_') return lex_identifier(lexer);
-    if (isdigit(*lexer->current)) return lex_number(lexer);
-    
+
+    if (*lexer->current == '\0') {
+        LOG_INFO("End of input reached");
+        return make_token(lexer, TOK_EOF, start, 0);
+    }
+
+    if (isalpha(*lexer->current) || *lexer->current == '_') {
+        LOG_INFO("Lexing identifier starting with '%c'", *lexer->current);
+        Token token = lex_identifier(lexer);
+        LOG_INFO("Lexed identifier: type=%s, text='%.*s'", token_type_to_string(token.type), (int)token.length, token.text);
+        return token;
+    }
+
+    if (isdigit(*lexer->current)) {
+        LOG_INFO("Lexing number starting with '%c'", *lexer->current);
+        Token token = lex_number(lexer);
+        LOG_INFO("Lexed number: type=%s, text='%.*s'", token_type_to_string(token.type), (int)token.length, token.text);
+        return token;
+    }
+
+    LOG_INFO("Processing single-character token or operator: '%c'", *lexer->current);
+
     switch (*lexer->current) {
         case '=':
         advance(lexer);
@@ -429,6 +450,7 @@ Token next_token(Lexer* lexer) {
             return make_token(lexer, TOK_PP_HASH, start, 1);
     }
     
+    LOG_INFO("Unknown token: '%c'", *lexer->current);
     advance(lexer);
     return make_token(lexer, TOK_UNKNOWN, start, 1);
 }
