@@ -39,6 +39,10 @@ static BasicBlock* create_basic_block(CFG *cfg, BlockType type) {
     block->df_count = 0;
     block->df_capacity = 0;
 
+    block->dominated = NULL;
+    block->dominated_count = 0;
+    block->dominated_capacity = 0;
+
     LOG_INFO("Created basic block %zu of type %d", block->id, type);
     
     // Add to CFG
@@ -115,6 +119,11 @@ static void process_statement(CFG *cfg, BasicBlock **current_block, ASTNode *stm
         case NODE_ASSIGNMENT:
         case NODE_RETURN:
         case NODE_UNARY_OP:
+            add_statement(*current_block, stmt);
+            break;
+
+        case NODE_FUNCTION_CALL:
+            LOG_INFO("Processing function call: %s", stmt->data.function_call.name);
             add_statement(*current_block, stmt);
             break;
             
@@ -313,6 +322,32 @@ void compute_dominator_tree(CFG *cfg) {
     } while (changed);
 
     LOG_INFO("Dominator tree computed successfully");
+
+    // Initialize the dominated array for each block
+    for (size_t i = 0; i < cfg->block_count; i++) {
+        BasicBlock *block = cfg->blocks[i];
+        block->dominated = NULL;
+        block->dominated_count = 0;
+        block->dominated_capacity = 0;
+    }
+
+    // Populate the dominated array based on dominator relationships
+    for (size_t i = 0; i < cfg->block_count; i++) {
+        BasicBlock *block = cfg->blocks[i];
+        if (block->dominator) {
+            BasicBlock *dominator = block->dominator;
+
+            // Ensure the dominator's dominated array has enough capacity
+            if (dominator->dominated_count >= dominator->dominated_capacity) {
+                size_t new_capacity = dominator->dominated_capacity == 0 ? 4 : dominator->dominated_capacity * 2;
+                dominator->dominated = realloc(dominator->dominated, sizeof(BasicBlock *) * new_capacity);
+                dominator->dominated_capacity = new_capacity;
+            }
+
+            // Add the current block to the dominator's dominated array
+            dominator->dominated[dominator->dominated_count++] = block;
+        }
+    }
 }
 
 void free_cfg(CFG *cfg) {
@@ -328,6 +363,7 @@ void free_cfg(CFG *cfg) {
             free(block->preds);
             free(block->succs);
             free(block->dom_frontier);
+            free(block->dominated);
             free(block);
         }
     }
@@ -471,6 +507,13 @@ void print_ast_to_stream(ASTNode *node, int indent, FILE *stream) {
 
         case NODE_TYPE_SPECIFIER:
             fprintf(stream, "TypeSpecifier: %s\n", node->data.type_spec.type ? "defined" : "undefined");
+            break;
+
+        case NODE_FUNCTION_CALL:
+            fprintf(stream, "FunctionCall: %s\n", node->data.function_call.name);
+            for (size_t i = 0; i < node->data.function_call.arg_count; i++) {
+                print_ast_to_stream(node->data.function_call.args[i], indent + 1, stream);
+            }
             break;
 
         default:

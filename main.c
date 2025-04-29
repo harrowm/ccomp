@@ -97,6 +97,15 @@ int main(int argc, char *argv[]) {
     compute_dominance_frontiers(cfg);
     generate_dominance_frontiers_dot(cfg, "df.dot");
     printf("Dominance Frontiers saved to df.dot\n");
+
+    // Insert φ-functions into the CFG
+    printf("\nInserting φ-functions into the CFG...\n");
+    insert_phi_functions(cfg);
+    printf("φ-functions inserted successfully.\n");
+
+    // Generate DOT file for modified CFG
+    generate_dot_file(cfg, "cfg_with_phi.dot");
+    printf("Modified Control Flow Graph with φ-functions saved to cfg_with_phi.dot\n");
         
     // Clean up
     printf("\nCleaning up ...\n");

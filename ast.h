@@ -27,9 +27,18 @@ typedef enum {
     NODE_FOR_STMT,
     NODE_UNARY_OP, // For unary operations like --, ++, etc.
     NODE_FUNCTION_CALL, // For function calls like foo(a, b)
+    NODE_EXPR, // For general expressions
     INVALID_NODE_TYPE,
     UNKNOWN_NODE_TYPE
 } NodeType;
+
+// Add expression types
+typedef enum {
+    EXPR_VAR, // Variable reference
+    EXPR_LITERAL, // Literal value
+    EXPR_BINARY_OP, // Binary operation
+    EXPR_UNARY_OP // Unary operation
+} ExprType;
 
 typedef enum {
     TYPE_INT,
@@ -149,6 +158,26 @@ typedef struct ASTNode {
         struct {
             Type *type;
         } type_spec;
+
+        // Expressions
+        struct {
+            ExprType op; // Expression type
+            union {
+                char *var_name; // Variable name for EXPR_VAR
+                struct {
+                    LiteralValue value; // Literal value for EXPR_LITERAL
+                } literal;
+                struct {
+                    int op; // Operator type for EXPR_BINARY_OP
+                    struct ASTNode *left;
+                    struct ASTNode *right;
+                } binary_op;
+                struct {
+                    int op; // Operator type for EXPR_UNARY_OP
+                    struct ASTNode *operand;
+                } unary_op;
+            } data;
+        } expr;
     } data;
 } ASTNode;
 

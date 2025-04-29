@@ -54,6 +54,10 @@ typedef struct BasicBlock {
     DominanceFrontier *dom_frontier; // Pointer to the dominance frontier structure
     size_t df_count;
     size_t df_capacity;
+
+    struct BasicBlock **dominated; // Array of blocks dominated by this block
+    size_t dominated_count;       // Number of blocks dominated
+    size_t dominated_capacity;    // Capacity of the dominated array
 } BasicBlock;
 
 typedef struct {
@@ -75,4 +79,6 @@ void free_dominance_frontiers(CFG *cfg);
 void generate_dominance_frontiers_dot(CFG *cfg, const char *filename);
 void print_dominance_frontiers(CFG *cfg, FILE *stream);
 void compute_dominator_tree(CFG *cfg);
+void insert_phi_functions(CFG *cfg);
+
 #endif // CFG_H

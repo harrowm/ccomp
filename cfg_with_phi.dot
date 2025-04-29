@@ -22,7 +22,8 @@ digraph CFG {
   Right:
     Literal: 2
 "];
-  Block4 [label="Block 4\nType: Normal Block\nStmt 0: Return
+  Block4 [label="Block 4\nType: Normal Block\nStmt 0: VarDecl: x
+\nStmt 1: Return
   VarRef: x
 "];
   Block0 -> Block2;
