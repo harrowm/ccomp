@@ -22,3 +22,9 @@ jobs:
 
       - name: Run lexer tests
         run: make test
+
+      - name: Build parser tests
+        run: make test_parser
+
+      - name: Run parser tests
+        run: ./test_parser

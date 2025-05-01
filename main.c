@@ -6,6 +6,7 @@
 
 #include "lexer.h"
 #include "ast.h"
+#include "parser.h"
 #include "cfg.h"
 #include "debug.h"
 #include <stdio.h>
@@ -14,7 +15,8 @@
 #include <string.h>
 
 // Forward declaration of parse function from parser.c
-ASTNode* parse(Lexer *lexer);
+// ASTNode* parse(Lexer *lexer);
+// now in parser.h
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {

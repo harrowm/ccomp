@@ -207,35 +207,64 @@ static Token lex_identifier(Lexer* lexer) {
 static Token lex_number(Lexer* lexer) {
     const char* start = lexer->current;
     bool is_float = false;
-    
+
+    // Check for hexadecimal prefix
+    if (*lexer->current == '0' && (lexer->current[1] == 'x' || lexer->current[1] == 'X')) {
+        advance(lexer); // Skip '0'
+        advance(lexer); // Skip 'x' or 'X'
+        while (isxdigit(*lexer->current)) {
+            advance(lexer);
+        }
+        size_t length = lexer->current - start;
+        return make_token(lexer, TOK_INTEGER, start, length);
+    }
+
+    // Check for octal numbers (starting with 0)
+    if (*lexer->current == '0' && isdigit(lexer->current[1])) {
+        advance(lexer); // Skip '0'
+        while (isdigit(*lexer->current) && *lexer->current < '8') {
+            advance(lexer);
+        }
+        size_t length = lexer->current - start;
+        return make_token(lexer, TOK_INTEGER, start, length);
+    }
+
+    // Handle numbers starting with a dot (e.g., .5)
+    if (*lexer->current == '.') {
+        is_float = true;
+        advance(lexer);
+        while (isdigit(*lexer->current)) advance(lexer);
+        size_t length = lexer->current - start;
+        return make_token(lexer, TOK_FLOAT, start, length);
+    }
+
     while (isdigit(*lexer->current)) advance(lexer);
-    
+
+    // Handle numbers ending with a dot (e.g., 1.)
     if (*lexer->current == '.') {
         is_float = true;
         advance(lexer);
         while (isdigit(*lexer->current)) advance(lexer);
     }
-    
+
     if (*lexer->current == 'e' || *lexer->current == 'E') {
         is_float = true;
         advance(lexer);
         if (*lexer->current == '+' || *lexer->current == '-') advance(lexer);
         while (isdigit(*lexer->current)) advance(lexer);
     }
-    
+
     if (*lexer->current == 'u' || *lexer->current == 'U') {
         advance(lexer);
         if (*lexer->current == 'l' || *lexer->current == 'L') advance(lexer);
-    }
-    else if (*lexer->current == 'l' || *lexer->current == 'L') {
+    } else if (*lexer->current == 'l' || *lexer->current == 'L') {
         advance(lexer);
         if (*lexer->current == 'u' || *lexer->current == 'U') advance(lexer);
-    }
-    else if (*lexer->current == 'f' || *lexer->current == 'F') {
+    } else if (*lexer->current == 'f' || *lexer->current == 'F') {
         is_float = true;
         advance(lexer);
     }
-    
+
     size_t length = lexer->current - start;
     return make_token(lexer, is_float ? TOK_FLOAT : TOK_INTEGER, start, length);
 }
@@ -244,38 +273,71 @@ static Token lex_string(Lexer* lexer, bool raw) {
     const char* start = lexer->current;
     char quote = *lexer->current;
     advance(lexer);
-    
+
     while (*lexer->current != quote && *lexer->current != '\0') {
         if (*lexer->current == '\\' && !raw) advance(lexer);
         advance(lexer);
     }
-    
-    if (*lexer->current == quote) advance(lexer);
-    
+
     size_t length = lexer->current - start;
+
+    if (*lexer->current == '\0') {
+        // Handle error: unmatched quote
+        LOG_ERROR("Unmatched quote at line %u, column %u", lexer->line, lexer->column);
+        return make_token(lexer, TOK_UNKNOWN, start, length);
+    }
+
+    advance(lexer); // Move past the closing quote
+    length = lexer->current - start;
     return make_token(lexer, raw ? TOK_RAW_STRING : TOK_STRING, start, length);
 }
 
 static Token lex_comment(Lexer* lexer) {
-    const char* start = lexer->current;
-   
+    const char* start = lexer->current - 1;  // -1 to allow for the initial / accepted before lex_comment() called
     if (*lexer->current == '/') {
-        advance(lexer);
-        while (*lexer->current != '\n' && *lexer->current != '\0') advance(lexer);
+        advance(lexer); // Skip the second '/'
+        while (*lexer->current != '\n' && *lexer->current != '\0') {
+            advance(lexer); // Skip the rest of the line
+        }
     } else if (*lexer->current == '*') {
-        advance(lexer);
+        advance(lexer); // Skip the '*'
         while (*lexer->current != '\0') {
             if (*lexer->current == '*' && lexer->current[1] == '/') {
-                advance(lexer);
-                advance(lexer);
+                advance(lexer); // Skip the '*'
+                advance(lexer); // Skip the '/'
                 break;
             }
-            advance(lexer);
+            advance(lexer); // Skip other characters
         }
     }
-    
-    size_t length = lexer->current - start;
+    size_t length = lexer->current - start; 
     return make_token(lexer, TOK_COMMENT, start, length);
+}
+
+static Token lex_char(Lexer* lexer) {
+    const char* start = lexer->current;
+    advance(lexer); // Skip the opening single quote
+
+    if (*lexer->current == '\\') {
+        // Handle escape sequences
+        advance(lexer); // Skip the backslash
+        if (*lexer->current != '\0') {
+            advance(lexer); // Skip the escaped character
+        }
+    } else {
+        // Handle regular characters
+        advance(lexer);
+    }
+
+    if (*lexer->current == '\'') {
+        advance(lexer); // Skip the closing single quote
+        size_t length = lexer->current - start;
+        return make_token(lexer, TOK_CHAR, start, length);
+    } else {
+        // Handle error: unmatched single quote or too many characters
+        LOG_ERROR("Invalid character literal at line %u, column %u", lexer->line, lexer->column);
+        return make_token(lexer, TOK_UNKNOWN, start, lexer->current - start);
+    }
 }
 
 Token next_token(Lexer* lexer) {
@@ -382,7 +444,11 @@ Token next_token(Lexer* lexer) {
             }
             return make_token(lexer, TOK_CARET, start, 1);
         
-        case '.': 
+        case '.':
+            // Check if the dot is part of a floating-point number
+            if (isdigit(lexer->current[1])) {
+                return lex_number(lexer);
+            }
             advance(lexer);
             if (*lexer->current == '.' && lexer->current[1] == '.') {
                 advance(lexer); advance(lexer);
@@ -433,12 +499,15 @@ Token next_token(Lexer* lexer) {
                 return make_token(lexer, TOK_SLASH_EQ, start, 2);
             }
             return make_token(lexer, TOK_SLASH, start, 1);
-        case '\'': return lex_string(lexer, false);
-        case '"': return lex_string(lexer, false);
+        case '\'':
+            return lex_char(lexer);
+        case '"':
+            return lex_string(lexer, false);
         case 'R':
             if (lexer->current[1] == '"') {
-                advance(lexer);
-                return lex_string(lexer, true);
+                advance(lexer); // Skip 'R'
+                advance(lexer); // Skip '"'
+                return lex_string(lexer, true); // Handle raw string literal
             }
             break;
         case '#':
@@ -448,8 +517,8 @@ Token next_token(Lexer* lexer) {
                 return make_token(lexer, TOK_PP_HASHHASH, start, 2);
             }
             return make_token(lexer, TOK_PP_HASH, start, 1);
-    }
-    
+            }
+
     LOG_INFO("Unknown token: '%c'", *lexer->current);
     advance(lexer);
     return make_token(lexer, TOK_UNKNOWN, start, 1);

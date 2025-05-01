@@ -6,6 +6,7 @@
 
 #include "ast.h"
 #include "lexer.h"
+#include "parser.h"
 #include "debug.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,26 +60,79 @@ static void advance(Parser *parser) {
 }
 
 static void synchronize(Parser *parser) {
-    LOG_INFO("current token: %s", token_type_to_string(parser->current.type));
-    LOG_INFO("previous token: %s", token_type_to_string(parser->previous.type));
-    LOG_INFO("LOOPING");
-    while(1){};
-    while (parser->current.type != TOK_EOF) {
-        if (parser->previous.type == TOK_SEMICOLON) return;
-        
-        switch (parser->current.type) {
-            case TOK_KW_RETURN:
-            case TOK_KW_IF:
-            case TOK_KW_WHILE:
-            case TOK_KW_FOR:
-            case TOK_KW_INT:
-            case TOK_KW_CHAR:
-            case TOK_KW_VOID:
-                return;
-            default:
-                advance(parser);
+    LOG_INFO("Synchronize: Current token type: %s", token_type_to_string(parser->current.type));
+    LOG_INFO("Synchronize: Previous token type: %s", token_type_to_string(parser->previous.type));
+    LOG_INFO("Entering synchronize: current token=%s, previous token=%s", 
+             token_type_to_string(parser->current.type), 
+             token_type_to_string(parser->previous.type));
+
+    LOG_INFO("Starting synchronization loop");
+    LOG_INFO("Initial token: %s, line: %u, column: %u", token_type_to_string(parser->current.type), parser->current.line, parser->current.column);
+    LOG_INFO("Initial previous token: %s, line: %u, column: %u", token_type_to_string(parser->previous.type), parser->previous.line, parser->previous.column);
+
+    int iteration_count = 0;
+    const int max_iterations = 1000; // Safeguard to prevent infinite loops
+
+    while (parser->current.type == TOK_SEMICOLON) {
+        LOG_INFO("Skipping redundant semicolon during synchronization, iteration: %d", iteration_count);
+        LOG_INFO("Current token before advance: %s, line: %u, column: %u", token_type_to_string(parser->current.type), parser->current.line, parser->current.column);
+        advance(parser);
+        LOG_INFO("Current token after advance: %s, line: %u, column: %u", token_type_to_string(parser->current.type), parser->current.line, parser->current.column);
+        if (++iteration_count > max_iterations) {
+            LOG_ERROR("Exceeded maximum iterations in synchronize while skipping semicolons");
+            return;
         }
     }
+
+    if (parser->current.type == TOK_EOF) {
+        LOG_INFO("Reached EOF during synchronization");
+        return;
+    }
+
+    while (parser->current.type == TOK_SEMICOLON || parser->current.type == TOK_UNKNOWN) {
+        LOG_INFO("Skipping invalid or redundant token: %s, iteration: %d", token_type_to_string(parser->current.type), iteration_count);
+        LOG_INFO("Current token before advance: %s, line: %u, column: %u", token_type_to_string(parser->current.type), parser->current.line, parser->current.column);
+        advance(parser);
+        LOG_INFO("Current token after advance: %s, line: %u, column: %u", token_type_to_string(parser->current.type), parser->current.line, parser->current.column);
+        if (++iteration_count > max_iterations) {
+            LOG_ERROR("Exceeded maximum iterations in synchronize while skipping invalid tokens");
+            return;
+        }
+    }
+
+    while (parser->current.type != TOK_EOF) {
+        LOG_INFO("Checking synchronization point: current token=%s, previous token=%s, iteration: %d", 
+                 token_type_to_string(parser->current.type), 
+                 token_type_to_string(parser->previous.type), 
+                 iteration_count);
+
+        if (parser->previous.type == TOK_SEMICOLON ||
+            parser->current.type == TOK_KW_RETURN ||
+            parser->current.type == TOK_KW_IF ||
+            parser->current.type == TOK_KW_WHILE ||
+            parser->current.type == TOK_KW_FOR ||
+            parser->current.type == TOK_KW_INT ||
+            parser->current.type == TOK_KW_CHAR ||
+            parser->current.type == TOK_KW_VOID) {
+            LOG_INFO("Recovered at valid synchronization point: %s", token_type_to_string(parser->current.type));
+            LOG_INFO("Parser state before resuming: current token=%s, previous token=%s", 
+                     token_type_to_string(parser->current.type), 
+                     token_type_to_string(parser->previous.type));
+            LOG_INFO("Parser panic mode: %s", parser->panic_mode ? "true" : "false");
+            return;
+        }
+
+        LOG_INFO("Advancing past token: %s, iteration: %d", token_type_to_string(parser->current.type), iteration_count);
+        LOG_INFO("Current token before advance: %s, line: %u, column: %u", token_type_to_string(parser->current.type), parser->current.line, parser->current.column);
+        advance(parser);
+        LOG_INFO("Current token after advance: %s, line: %u, column: %u", token_type_to_string(parser->current.type), parser->current.line, parser->current.column);
+        if (++iteration_count > max_iterations) {
+            LOG_ERROR("Exceeded maximum iterations in synchronize while advancing past tokens");
+            return;
+        }
+    }
+
+    LOG_INFO("Exiting synchronize: current token=%s, iteration: %d", token_type_to_string(parser->current.type), iteration_count);
 }
 
 static void error_at_current(Parser *parser, const char *message) {
@@ -135,7 +189,7 @@ static Type* create_array_type(Type *base, size_t size) {
     return type;
 }
 
-ASTNode* create_literal_node(int value, Type *type) {
+static ASTNode* create_literal_node(int value, Type *type) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_LITERAL;
@@ -144,7 +198,7 @@ ASTNode* create_literal_node(int value, Type *type) {
     return node;
 }
 
-ASTNode *create_literal_node_with_ptr(void *ptr, Type *type) {
+static ASTNode *create_literal_node_with_ptr(void *ptr, Type *type) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_LITERAL;
@@ -153,7 +207,7 @@ ASTNode *create_literal_node_with_ptr(void *ptr, Type *type) {
     return node;
 }
 
-ASTNode* create_binary_op_node(int op, ASTNode *left, ASTNode *right) {
+static ASTNode* create_binary_op_node(int op, ASTNode *left, ASTNode *right) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_BINARY_OP;
@@ -163,7 +217,7 @@ ASTNode* create_binary_op_node(int op, ASTNode *left, ASTNode *right) {
     return node;
 }
 
-ASTNode* create_unary_op_node(int op, ASTNode *operand, bool is_prefix) {
+static ASTNode* create_unary_op_node(int op, ASTNode *operand, bool is_prefix) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_UNARY_OP;
@@ -173,7 +227,7 @@ ASTNode* create_unary_op_node(int op, ASTNode *operand, bool is_prefix) {
     return node;
 }
 
-ASTNode* create_var_ref_node(const char *name, Type *type) {
+static ASTNode* create_var_ref_node(const char *name, Type *type) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_VAR_REF;
@@ -182,7 +236,7 @@ ASTNode* create_var_ref_node(const char *name, Type *type) {
     return node;
 }
 
-ASTNode* create_var_decl_node(const char *name, Type *type, ASTNode *init_value) {
+static ASTNode* create_var_decl_node(const char *name, Type *type, ASTNode *init_value) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_VAR_DECL;
@@ -192,7 +246,7 @@ ASTNode* create_var_decl_node(const char *name, Type *type, ASTNode *init_value)
     return node;
 }
 
-ASTNode* create_assignment_node(const char *name, ASTNode *value) {
+static ASTNode* create_assignment_node(const char *name, ASTNode *value) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_ASSIGNMENT;
@@ -201,7 +255,7 @@ ASTNode* create_assignment_node(const char *name, ASTNode *value) {
     return node;
 }
 
-ASTNode* create_function_decl_node(const char *name, Type *return_type, ASTNode *params, ASTNode *body) {
+static ASTNode* create_function_decl_node(const char *name, Type *return_type, ASTNode *params, ASTNode *body) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_FUNCTION_DECL;
@@ -212,7 +266,7 @@ ASTNode* create_function_decl_node(const char *name, Type *return_type, ASTNode 
     return node;
 }
 
-ASTNode* create_return_node(ASTNode *value) {
+static ASTNode* create_return_node(ASTNode *value) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_RETURN;
@@ -220,7 +274,7 @@ ASTNode* create_return_node(ASTNode *value) {
     return node;
 }
 
-ASTNode* create_param_list_node(ASTNode **params, size_t count) {
+static ASTNode* create_param_list_node(ASTNode **params, size_t count) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_PARAM_LIST;
@@ -229,7 +283,7 @@ ASTNode* create_param_list_node(ASTNode **params, size_t count) {
     return node;
 }
 
-ASTNode* create_stmt_list_node(ASTNode **stmts, size_t count) {
+static ASTNode* create_stmt_list_node(ASTNode **stmts, size_t count) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_STMT_LIST;
@@ -238,7 +292,7 @@ ASTNode* create_stmt_list_node(ASTNode **stmts, size_t count) {
     return node;
 }
 
-ASTNode* create_type_spec_node(Type *type) {
+static ASTNode* create_type_spec_node(Type *type) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_TYPE_SPECIFIER;
@@ -317,7 +371,7 @@ static ASTNode* parse_unary(Parser *parser) {
     if (match(parser, TOK_MINUS) || match(parser, TOK_BANG)) {
         Token op = parser->previous;
         ASTNode *right = parse_unary(parser);
-        return create_binary_op_node(op.type, NULL, right);
+        return create_unary_op_node(op.type, right, true); // true for prefix
     }
 
     if (match(parser, TOK_MINUS_MINUS)) {
@@ -343,22 +397,34 @@ static ASTNode* parse_binary(Parser *parser, ASTNode *left, Precedence precedenc
         if (current_prec < precedence) break;
         Token op = parser->current;
         advance(parser);
-        
+
+        // Special case for assignment operator '='
+        if (op.type == TOK_EQ && precedence == PREC_ASSIGNMENT) {
+            LOG_INFO("Detected assignment operator in parse_binary");
+            ASTNode *right = parse_expression(parser);
+            if (!right) {
+                synchronize(parser);
+                return NULL;
+            }
+            return create_assignment_node(left->data.var_ref.name, right);
+        }
+
         ASTNode *right = parse_unary(parser);
         if (!right) {
             synchronize(parser);
             return NULL;
         }
-        
+
         current_prec = get_precedence(parser->current.type);
         while (current_prec > get_precedence(op.type)) {
             right = parse_binary(parser, right, current_prec);
             current_prec = get_precedence(parser->current.type);
         }
-        
+
+        LOG_INFO("Creating binary operation node with operator: %s", token_type_to_string(op.type));
         left = create_binary_op_node(op.type, left, right);
     }
-    
+
     return left;
 }
 
@@ -396,7 +462,8 @@ static Precedence get_precedence(TokenType type) {
 }
 
 static ASTNode* parse_expression(Parser *parser) {
-    LOG_INFO("current token: %s", token_type_to_string(parser->current.type));
+    LOG_INFO("Parsing expression: current token='%s'", token_type_to_string(parser->current.type));
+    
     ASTNode *left = parse_unary(parser);
     if (!left) {
         synchronize(parser);
@@ -427,14 +494,47 @@ static ASTNode* parse_var_declaration(Parser *parser) {
     LOG_INFO("current token: %s", token_type_to_string(parser->current.type));
     Type *type = parse_type(parser);
     if (!type) return NULL;
+
+    if (type->kind == TYPE_ARRAY && type->array_size == 0) {
+        LOG_ERROR("Array with unspecified size detected in parse_var_declaration");
+        error_at_current(parser, "Array with unspecified size is not allowed outside of function parameters.");
+        parser->had_error = true; // Mark the parser as having encountered an error
+        return NULL; // Abort parsing this declaration immediately
+    }
+
+    LOG_INFO("parse_var_declaration: Starting variable declaration parsing");
+    LOG_INFO("parse_var_declaration: Type kind = %d, Array size = %zu", type->kind, type->array_size);
+
     consume(parser, TOK_IDENTIFIER, "Expect variable name.");
     char *name = strndup(parser->previous.text, parser->previous.length);
-    
+
+    // Check for array syntax
+    if (match(parser, TOK_LBRACKET)) {
+        if (match(parser, TOK_RBRACKET)) {
+            // Array with unspecified size
+            LOG_INFO("Detected array with unspecified size in parse_var_declaration");
+            type->kind = TYPE_ARRAY;
+            type->array_size = 0;
+        } else {
+            // Array with specified size
+            ASTNode *size_expr = parse_expression(parser);
+            if (size_expr && size_expr->type == NODE_LITERAL) {
+                LOG_INFO("Detected array with specified size in parse_var_declaration: size=%d", size_expr->data.literal.value.int_value);
+                type->kind = TYPE_ARRAY;
+                type->array_size = size_expr->data.literal.value.int_value;
+                consume(parser, TOK_RBRACKET, "Expect ']' after array size.");
+            } else {
+                error_at_current(parser, "Array size must be a constant expression.");
+                return NULL;
+            }
+        }
+    }
+
     ASTNode *init = NULL;
     if (match(parser, TOK_EQ)) {
         init = parse_expression(parser);
     }
-    
+
     consume(parser, TOK_SEMICOLON, "Expect ';' after variable declaration.");
     LOG_INFO("parsed variable declaration: %s", name);
     return create_var_decl_node(name, type, init);
@@ -562,39 +662,48 @@ static ASTNode* parse_statement(Parser *parser) {
     ASTNode *expr = parse_expression(parser);
     if (expr && expr->type == NODE_VAR_REF && match(parser, TOK_EQ)) {
         // It's an assignment
+        LOG_INFO("Detected assignment: variable=%s", expr->data.var_ref.name);
         ASTNode *value = parse_expression(parser);
         consume(parser, TOK_SEMICOLON, "Expect ';' after assignment.");
         return create_assignment_node(expr->data.var_ref.name, value);
     }
 
     // Otherwise it's an expression statement
+    LOG_INFO("Parsing as expression statement");
     consume(parser, TOK_SEMICOLON, "Expect ';' after expression.");
     return expr;
 }
 
 static ASTNode* parse_block(Parser *parser) {
+    LOG_INFO("Entering parse_block: current token=%s", token_type_to_string(parser->current.type));
+
     ASTNode **stmts = NULL;
     size_t count = 0;
     size_t capacity = 0;
 
     while (!check(parser, TOK_RBRACE) && !check(parser, TOK_EOF)) {
-        LOG_INFO("about to parse a statement");
+        LOG_INFO("About to parse a statement: current token=%s", token_type_to_string(parser->current.type));
         ASTNode *stmt = parse_statement(parser);
-        if (!stmt) continue;
-        
+        if (!stmt) {
+            LOG_INFO("parse_statement returned NULL, advancing to avoid infinite loop");
+            advance(parser); // Ensure the parser moves forward
+            continue;
+        }
+
         if (count >= capacity) {
             capacity = capacity == 0 ? 8 : capacity * 2;
             stmts = realloc(stmts, sizeof(ASTNode*) * capacity);
             if (!stmts) {
-                fprintf(stderr, "Memory allocation failed\n");
+                LOG_ERROR("Memory allocation failed in parse_block");
                 return NULL;
             }
         }
-        
+
         stmts[count++] = stmt;
     }
-    
+
     consume(parser, TOK_RBRACE, "Expect '}' after block.");
+    LOG_INFO("Exiting parse_block: current token=%s", token_type_to_string(parser->current.type));
     return create_stmt_list_node(stmts, count);
 }
 
@@ -675,7 +784,7 @@ static Type* parse_type(Parser *parser) {
 }
 
 static ASTNode* parse_function(Parser *parser) {
-    printf("In parse_function, about to parse a type\n");
+    LOG_INFO("about to parse a type");
     Type *return_type = parse_type(parser);
     if (!return_type) return NULL;
     consume(parser, TOK_IDENTIFIER, "Expect function name.");
@@ -695,7 +804,7 @@ static ASTNode* parse_program(Parser *parser) {
     size_t count = 0;
     size_t capacity = 0;
     while (!check(parser, TOK_EOF)) {
-        printf("In parse_program(), about to parse a function\n");
+        LOG_INFO("about to parse a function");
         ASTNode *function = parse_function(parser);
         if (!function) continue;
         
