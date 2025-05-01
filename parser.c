@@ -992,15 +992,13 @@ void print_ast(ASTNode *node, int indent) {
 
         case NODE_FUNCTION_DECL:
             printf("Function: %s\n", node->data.function_decl.name);
-            // Print parameters with proper indentation
             if (node->data.function_decl.params) {
-                for (int i = 0; i < indent+1; i++) printf("  ");
+                for (int i = 0; i < indent + 1; i++) printf("  ");
                 printf("Parameters:\n");
                 print_ast(node->data.function_decl.params, indent + 2);
             }
-            // Print body with proper indentation
             if (node->data.function_decl.body) {
-                for (int i = 0; i < indent+1; i++) printf("  ");
+                for (int i = 0; i < indent + 1; i++) printf("  ");
                 printf("Body:\n");
                 print_ast(node->data.function_decl.body, indent + 2);
             }
@@ -1012,26 +1010,6 @@ void print_ast(ASTNode *node, int indent) {
                 print_ast(node->data.var_decl.init_value, indent + 1);
             }
             break;
-            
-        case NODE_ASSIGNMENT:
-            printf("Assignment: %s\n", node->data.assignment.name);
-            print_ast(node->data.assignment.value, indent + 1);
-            break;
-
-        case NODE_BINARY_OP: {
-            const char *op_str = token_type_to_string(node->data.binary_op.op);
-            printf("BinaryOp: %s\n", op_str);
-            print_ast(node->data.binary_op.left, indent + 1);
-            print_ast(node->data.binary_op.right, indent + 1);
-            break;
-            }
-
-        case NODE_UNARY_OP: {
-            const char *op_str = token_type_to_string(node->data.unary_op.op);
-            printf("UnaryOp: %s (%s)\n", op_str, node->data.unary_op.is_prefix ? "prefix" : "postfix");
-            print_ast(node->data.unary_op.operand, indent + 1);
-            break;
-        }
 
         case NODE_RETURN:
             printf("Return\n");
@@ -1045,7 +1023,22 @@ void print_ast(ASTNode *node, int indent) {
                 printf("Literal: %d\n", node->data.literal.value.int_value);
             }
             break;
-    
+
+        case NODE_BINARY_OP: {
+            const char *op_str = token_type_to_string(node->data.binary_op.op);
+            printf("BinaryOp: %s\n", op_str);
+            print_ast(node->data.binary_op.left, indent + 1);
+            print_ast(node->data.binary_op.right, indent + 1);
+            break;
+        }
+
+        case NODE_UNARY_OP: {
+            const char *op_str = token_type_to_string(node->data.unary_op.op);
+            printf("UnaryOp: %s (%s)\n", op_str, node->data.unary_op.is_prefix ? "prefix" : "postfix");
+            print_ast(node->data.unary_op.operand, indent + 1);
+            break;
+        }
+
         case NODE_VAR_REF:
             printf("VarRef: %s\n", node->data.var_ref.name);
             break;
@@ -1154,6 +1147,10 @@ void print_ast(ASTNode *node, int indent) {
         case INVALID_NODE_TYPE:
         case UNKNOWN_NODE_TYPE:
             LOG_ERROR("Invalid or unknown node type encountered during AST print\n");
+            break;
+
+        default:
+            printf("Unknown node type\n");
             break;
     }
 }
