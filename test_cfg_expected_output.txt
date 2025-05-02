@@ -1,0 +1,53 @@
+Control Flow Graph:
+==================
+Block 0 (Entry Block):
+  Statements:
+    (none)
+  Predecessors: (none)
+  Successors: 2
+
+Block 1 (Exit Block):
+  Statements:
+    (none)
+  Predecessors: 5
+  Successors: (none)
+
+Block 2 (Normal Block):
+  Statements:
+    - VarDecl: x
+      Initializer:
+        Literal: 42
+    - BinaryOp: GT
+      Left:
+        VarRef: x
+
+      Right:
+        Literal: 0
+  Predecessors: 0
+  Successors: 3, 4
+
+Block 3 (If-Then Block):
+  Statements:
+    - Assignment: x
+      BinaryOp: MINUS
+      Left:
+        VarRef: x
+
+      Right:
+        Literal: 1
+  Predecessors: 2
+  Successors: 5
+
+Block 4 (If-Else Block):
+  Statements:
+    (none)
+  Predecessors: 2
+  Successors: 5
+
+Block 5 (Normal Block):
+  Statements:
+    - Return
+      VarRef: x
+  Predecessors: 3, 4
+  Successors: 1
+

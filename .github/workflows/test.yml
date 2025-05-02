@@ -28,3 +28,9 @@ jobs:
 
       - name: Run parser tests
         run: ./test_parser
+
+      - name: Build CFG tests
+        run: make test_cfg
+
+      - name: Run CFG tests
+        run: ./test_cfg

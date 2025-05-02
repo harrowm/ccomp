@@ -195,6 +195,7 @@ static ASTNode* create_literal_node(int value, Type *type) {
     node->type = NODE_LITERAL;
     node->data.literal.value.int_value = value;
     node->data.literal.type = type;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(node->type));
     return node;
 }
 
@@ -204,6 +205,7 @@ static ASTNode *create_literal_node_with_ptr(void *ptr, Type *type) {
     node->type = NODE_LITERAL;
     node->data.literal.value.ptr_value = ptr;
     node->data.literal.type = type;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(node->type));
     return node;
 }
 
@@ -214,6 +216,7 @@ static ASTNode* create_binary_op_node(int op, ASTNode *left, ASTNode *right) {
     node->data.binary_op.op = op;
     node->data.binary_op.left = left;
     node->data.binary_op.right = right;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(node->type));
     return node;
 }
 
@@ -224,6 +227,7 @@ static ASTNode* create_unary_op_node(int op, ASTNode *operand, bool is_prefix) {
     node->data.unary_op.op = op;
     node->data.unary_op.operand = operand;
     node->data.unary_op.is_prefix = is_prefix;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(node->type));
     return node;
 }
 
@@ -233,6 +237,7 @@ static ASTNode* create_var_ref_node(const char *name, Type *type) {
     node->type = NODE_VAR_REF;
     node->data.var_ref.name = strdup(name);
     node->data.var_ref.type = type;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(node->type));
     return node;
 }
 
@@ -243,6 +248,7 @@ static ASTNode* create_var_decl_node(const char *name, Type *type, ASTNode *init
     node->data.var_decl.name = strdup(name);
     node->data.var_decl.type = type;
     node->data.var_decl.init_value = init_value;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(node->type));
     return node;
 }
 
@@ -252,6 +258,7 @@ static ASTNode* create_assignment_node(const char *name, ASTNode *value) {
     node->type = NODE_ASSIGNMENT;
     node->data.assignment.name = strdup(name);
     node->data.assignment.value = value;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(node->type));
     return node;
 }
 
@@ -263,6 +270,7 @@ static ASTNode* create_function_decl_node(const char *name, Type *return_type, A
     node->data.function_decl.return_type = return_type;
     node->data.function_decl.params = params;
     node->data.function_decl.body = body;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(node->type));
     return node;
 }
 
@@ -271,6 +279,7 @@ static ASTNode* create_return_node(ASTNode *value) {
     if (!node) return NULL;
     node->type = NODE_RETURN;
     node->data.return_stmt.value = value;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(node->type));
     return node;
 }
 
@@ -280,6 +289,7 @@ static ASTNode* create_param_list_node(ASTNode **params, size_t count) {
     node->type = NODE_PARAM_LIST;
     node->data.param_list.params = params;
     node->data.param_list.count = count;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(node->type));
     return node;
 }
 
@@ -289,6 +299,7 @@ static ASTNode* create_stmt_list_node(ASTNode **stmts, size_t count) {
     node->type = NODE_STMT_LIST;
     node->data.stmt_list.stmts = stmts;
     node->data.stmt_list.count = count;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(node->type));
     return node;
 }
 
@@ -297,6 +308,7 @@ static ASTNode* create_type_spec_node(Type *type) {
     if (!node) return NULL;
     node->type = NODE_TYPE_SPECIFIER;
     node->data.type_spec.type = type;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(node->type));
     return node;
 }
 
@@ -349,6 +361,7 @@ static ASTNode* parse_primary(Parser *parser) {
             call_node->data.function_call.name = name;
             call_node->data.function_call.args = args;
             call_node->data.function_call.arg_count = arg_count;
+            LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(call_node->type));
             return call_node;
         }
 
@@ -564,6 +577,7 @@ static ASTNode* parse_if_statement(Parser *parser) {
     if_node->data.if_stmt.condition = condition;
     if_node->data.if_stmt.then_branch = then_branch;
     if_node->data.if_stmt.else_branch = else_branch;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(if_node->type));
     return if_node;
 }
 
@@ -582,6 +596,7 @@ static ASTNode* parse_while_statement(Parser *parser) {
     while_node->type = NODE_WHILE_STMT;
     while_node->data.while_stmt.condition = condition;
     while_node->data.while_stmt.body = body;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(while_node->type));
     return while_node;
 }
 
@@ -620,6 +635,7 @@ static ASTNode* parse_for_statement(Parser *parser) {
     for_node->data.for_stmt.condition = condition;
     for_node->data.for_stmt.update = update;
     for_node->data.for_stmt.body = body;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(for_node->type));
     return for_node;
 }
 
@@ -800,6 +816,11 @@ static ASTNode* parse_function(Parser *parser) {
 }
 
 static ASTNode* parse_program(Parser *parser) {
+    if (parser->current.type == TOK_EOF) {
+        LOG_INFO("Empty input detected, returning NULL AST");
+        return NULL;
+    }
+
     ASTNode **functions = NULL;
     size_t count = 0;
     size_t capacity = 0;
@@ -826,6 +847,7 @@ static ASTNode* parse_program(Parser *parser) {
     program->type = NODE_PROGRAM;
     program->data.stmt_list.stmts = functions;
     program->data.stmt_list.count = count;
+    LOG_INFO("Creating AST Node: Type=%s", node_type_to_string(program->type));
     return program;
 }
 

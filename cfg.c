@@ -9,6 +9,7 @@
 #include "ast.h"
 #include "debug.h"
 #include "lexer.h" // For token_type_to_string()
+#include "parser.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -110,6 +111,7 @@ static void add_successor(BasicBlock *block, BasicBlock *succ) {
 
 static void process_statement(CFG *cfg, BasicBlock **current_block, ASTNode *stmt) {
     LOG_INFO("Processing statement: %s", node_type_to_string(stmt->type));
+    LOG_INFO("AST Traversal: Node type: %s", node_type_to_string(stmt->type));
 
     switch (stmt->type) {
         case NODE_BINARY_OP:
@@ -118,7 +120,11 @@ static void process_statement(CFG *cfg, BasicBlock **current_block, ASTNode *stm
         case NODE_VAR_DECL:
         case NODE_ASSIGNMENT:
         case NODE_RETURN:
+            add_statement(*current_block, stmt);
+            break;
+
         case NODE_UNARY_OP:
+            LOG_INFO("Processing unary operation node");
             add_statement(*current_block, stmt);
             break;
 
@@ -235,38 +241,41 @@ CFG* ast_to_cfg(ASTNode *ast) {
         LOG_ERROR("Invalid AST root node for CFG construction");
         return NULL;
     }
-    
+
     CFG *cfg = malloc(sizeof(CFG));
     if (!cfg) {
         LOG_ERROR("Unable to allocate memory for CFG");
         return NULL;
     }
-    
+
     cfg->blocks = NULL;
     cfg->block_count = 0;
     cfg->block_capacity = 0;
-    
+
     // Create entry and exit blocks
     cfg->entry = create_basic_block(cfg, BLOCK_ENTRY);
     cfg->exit = create_basic_block(cfg, BLOCK_EXIT);
     LOG_INFO("Created entry and exit blocks");
-    
-    BasicBlock *current_block = cfg->entry;
-    
+
     // Process all functions in the program
     for (size_t i = 0; i < ast->data.stmt_list.count; i++) {
         ASTNode *func = ast->data.stmt_list.stmts[i];
         if (func->type != NODE_FUNCTION_DECL) continue;
-        
+
+        // Create a new block for the function body
+        BasicBlock *func_block = create_basic_block(cfg, BLOCK_NORMAL);
+        add_successor(cfg->entry, func_block);
+
         // Process function body
+        BasicBlock *current_block = func_block;
         process_statement(cfg, &current_block, func->data.function_decl.body);
+
+        // Connect the last block of the function to the exit block
+        if (current_block != cfg->exit) {
+            add_successor(current_block, cfg->exit);
+        }
     }
-    
-    // Connect last block to exit
-    if (current_block != cfg->exit) {
-        add_successor(current_block, cfg->exit);
-    }
-    
+
     return cfg;
 }
 
@@ -385,66 +394,81 @@ const char* block_type_to_string(BlockType type) {
     }
 }
 
-void print_ast_to_stream(ASTNode *node, int indent, FILE *stream) {
+// Helper function to print newline and indentation
+static void newline_indent(int spaces, FILE *f) {
+    fprintf(f, "\n");
+    for (int i = 0; i < spaces; i++) fprintf(f, " ");
+}
+
+// Function previously named print_ast_to_stream, rewritten for specific CFG formatting
+void print_ast_node_for_cfg(ASTNode *node, int current_indent_spaces, FILE *stream) {
     if (!node || !stream) return;
-    for (int i = 0; i < indent; i++) fprintf(stream, "  ");
 
     switch (node->type) {
-        case NODE_PROGRAM:
-            fprintf(stream, "Program\n");
-            for (size_t i = 0; i < node->data.stmt_list.count; i++) {
-                print_ast_to_stream(node->data.stmt_list.stmts[i], indent + 1, stream);
-            }
-            break;
-
-        case NODE_FUNCTION_DECL:
-            fprintf(stream, "Function: %s\n", node->data.function_decl.name);
-            if (node->data.function_decl.params) {
-                fprintf(stream, "%*sParameters:\n", indent + 2, "");
-                print_ast_to_stream(node->data.function_decl.params, indent + 2, stream);
-            }
-            if (node->data.function_decl.body) {
-                fprintf(stream, "%*sBody:\n", indent + 2, "");
-                print_ast_to_stream(node->data.function_decl.body, indent + 2, stream);
-            }
+        // These node types are not typically expected in a CFG block statement list
+        case NODE_PROGRAM: 
+        case NODE_FUNCTION_DECL: 
+        case NODE_PARAM_LIST: 
+        case NODE_STMT_LIST: 
+        case NODE_IF_STMT: 
+        case NODE_WHILE_STMT: 
+        case NODE_FOR_STMT: 
+        case NODE_TYPE_SPECIFIER:
+            LOG_ERROR("Unexpected node type in CFG: %s", node_type_to_string(node->type));
             break;
 
         case NODE_VAR_DECL:
-            fprintf(stream, "VarDecl: %s\n", node->data.var_decl.name);
+            fprintf(stream, "VarDecl: %s", node->data.var_decl.name);
             if (node->data.var_decl.init_value) {
-                fprintf(stream, "%*sInitializer:\n", indent + 2, "");
-                print_ast_to_stream(node->data.var_decl.init_value, indent + 2, stream);
+                newline_indent(current_indent_spaces, stream); // Same indent for Initializer label
+                fprintf(stream, "Initializer:");
+                newline_indent(current_indent_spaces + 2, stream); // Indent value +2
+                print_ast_node_for_cfg(node->data.var_decl.init_value, current_indent_spaces + 2, stream);
+            } else {
+                fprintf(stream, "\n"); // End line if no initializer
             }
             break;
 
         case NODE_ASSIGNMENT:
-            fprintf(stream, "Assignment: %s\n", node->data.assignment.name);
-            print_ast_to_stream(node->data.assignment.value, indent + 1, stream);
+            fprintf(stream, "Assignment: %s", node->data.assignment.name);
+            newline_indent(current_indent_spaces, stream); // Same indent for value
+            print_ast_node_for_cfg(node->data.assignment.value, current_indent_spaces, stream);
             break;
 
         case NODE_BINARY_OP:
-            fprintf(stream, "BinaryOp: %s\n", token_type_to_string(node->data.binary_op.op));
-            fprintf(stream, "%*sLeft:\n", indent + 2, "");
-            print_ast_to_stream(node->data.binary_op.left, indent + 2, stream);
-            fprintf(stream, "%*sRight:\n", indent + 2, "");
-            print_ast_to_stream(node->data.binary_op.right, indent + 2, stream);
+            fprintf(stream, "BinaryOp: %s", token_type_to_string(node->data.binary_op.op));
+            newline_indent(current_indent_spaces, stream); // Same indent for Left label
+            fprintf(stream, "Left:");
+            newline_indent(current_indent_spaces + 2, stream); // Indent left operand +2
+            print_ast_node_for_cfg(node->data.binary_op.left, current_indent_spaces + 2, stream);
+            newline_indent(current_indent_spaces, stream); // Same indent for Right label
+            fprintf(stream, "Right:");
+            newline_indent(current_indent_spaces + 2, stream); // Indent right operand +2
+            print_ast_node_for_cfg(node->data.binary_op.right, current_indent_spaces + 2, stream);
             break;
 
         case NODE_UNARY_OP:
-            fprintf(stream, "UnaryOp: %s (%s)\n", token_type_to_string(node->data.unary_op.op),
-                    node->data.unary_op.is_prefix ? "prefix" : "postfix");
-            print_ast_to_stream(node->data.unary_op.operand, indent + 1, stream);
-            break;
+             fprintf(stream, "UnaryOp: %s (%s)", token_type_to_string(node->data.unary_op.op),
+                     node->data.unary_op.is_prefix ? "prefix" : "postfix");
+             newline_indent(current_indent_spaces + 2, stream); // Indent operand +2
+             print_ast_node_for_cfg(node->data.unary_op.operand, current_indent_spaces + 2, stream);
+             break;
 
         case NODE_RETURN:
-            fprintf(stream, "Return\n");
-            print_ast_to_stream(node->data.return_stmt.value, indent + 1, stream);
+            fprintf(stream, "Return");
+            if (node->data.return_stmt.value) {
+                newline_indent(current_indent_spaces, stream); // Same indent for return value
+                print_ast_node_for_cfg(node->data.return_stmt.value, current_indent_spaces, stream);
+            } else {
+                 fprintf(stream, "\n"); // End line if no value
+            }
             break;
 
         case NODE_LITERAL:
-            if (node->data.literal.type->kind == TYPE_POINTER) {
+            if (node->data.literal.type && node->data.literal.type->kind == TYPE_POINTER) {
                 fprintf(stream, "Literal (pointer): %p\n", node->data.literal.value.ptr_value);
             } else {
+                // Assuming int for simplicity based on expected output
                 fprintf(stream, "Literal: %d\n", node->data.literal.value.int_value);
             }
             break;
@@ -453,71 +477,22 @@ void print_ast_to_stream(ASTNode *node, int indent, FILE *stream) {
             fprintf(stream, "VarRef: %s\n", node->data.var_ref.name);
             break;
 
-        case NODE_PARAM_LIST:
-            fprintf(stream, "ParamList:\n");
-            for (size_t i = 0; i < node->data.param_list.count; i++) {
-                print_ast_to_stream(node->data.param_list.params[i], indent + 1, stream);
-            }
-            break;
-
-        case NODE_STMT_LIST:
-            fprintf(stream, "StmtList:\n");
-            for (size_t i = 0; i < node->data.stmt_list.count; i++) {
-                print_ast_to_stream(node->data.stmt_list.stmts[i], indent + 1, stream);
-            }
-            break;
-
-        case NODE_IF_STMT:
-            fprintf(stream, "IfStatement\n");
-            fprintf(stream, "%*sCondition:\n", indent + 2, "");
-            print_ast_to_stream(node->data.if_stmt.condition, indent + 2, stream);
-            fprintf(stream, "%*sThen:\n", indent + 2, "");
-            print_ast_to_stream(node->data.if_stmt.then_branch, indent + 2, stream);
-            if (node->data.if_stmt.else_branch) {
-                fprintf(stream, "%*sElse:\n", indent + 2, "");
-                print_ast_to_stream(node->data.if_stmt.else_branch, indent + 2, stream);
-            }
-            break;
-
-        case NODE_WHILE_STMT:
-            fprintf(stream, "WhileStatement\n");
-            fprintf(stream, "%*sCondition:\n", indent + 2, "");
-            print_ast_to_stream(node->data.while_stmt.condition, indent + 2, stream);
-            fprintf(stream, "%*sBody:\n", indent + 2, "");
-            print_ast_to_stream(node->data.while_stmt.body, indent + 2, stream);
-            break;
-
-        case NODE_FOR_STMT:
-            fprintf(stream, "ForStatement\n");
-            if (node->data.for_stmt.init) {
-                fprintf(stream, "%*sInitializer:\n", indent + 2, "");
-                print_ast_to_stream(node->data.for_stmt.init, indent + 2, stream);
-            }
-            if (node->data.for_stmt.condition) {
-                fprintf(stream, "%*sCondition:\n", indent + 2, "");
-                print_ast_to_stream(node->data.for_stmt.condition, indent + 2, stream);
-            }
-            if (node->data.for_stmt.update) {
-                fprintf(stream, "%*sUpdate:\n", indent + 2, "");
-                print_ast_to_stream(node->data.for_stmt.update, indent + 2, stream);
-            }
-            fprintf(stream, "%*sBody:\n", indent + 2, "");
-            print_ast_to_stream(node->data.for_stmt.body, indent + 2, stream);
-            break;
-
-        case NODE_TYPE_SPECIFIER:
-            fprintf(stream, "TypeSpecifier: %s\n", node->data.type_spec.type ? "defined" : "undefined");
-            break;
-
         case NODE_FUNCTION_CALL:
-            fprintf(stream, "FunctionCall: %s\n", node->data.function_call.name);
-            for (size_t i = 0; i < node->data.function_call.arg_count; i++) {
-                print_ast_to_stream(node->data.function_call.args[i], indent + 1, stream);
+            fprintf(stream, "FunctionCall: %s", node->data.function_call.name);
+            if (node->data.function_call.arg_count > 0) {
+                 newline_indent(current_indent_spaces, stream); // Same indent for Args label
+                 fprintf(stream, "Arguments:");
+                 for (size_t i = 0; i < node->data.function_call.arg_count; i++) {
+                     newline_indent(current_indent_spaces + 2, stream); // Indent args +2
+                     print_ast_node_for_cfg(node->data.function_call.args[i], current_indent_spaces + 2, stream);
+                 }
+            } else {
+                 fprintf(stream, "\n"); // End line if no args
             }
             break;
 
         default:
-            fprintf(stream, "Unknown node type\n");
+            fprintf(stream, "Unknown node type (%d)\n", node->type);
             break;
     }
 }
@@ -537,30 +512,31 @@ void print_cfg(CFG *cfg, FILE *stream) {
             fprintf(stream, "    (none)\n");
         } else {
             for (size_t j = 0; j < block->stmt_count; j++) {
-                fprintf(stream, "    - ");
-                print_ast_to_stream(block->stmts[j], 4, stream);
+                fprintf(stream, "    - "); // 6 characters prefix
+                // Call the new function with the starting indentation level (6 spaces)
+                print_ast_node_for_cfg(block->stmts[j], 6, stream);
             }
         }
 
-        fprintf(stream, "  Predecessors:");
+        fprintf(stream, "  Predecessors: ");
         if (block->pred_count == 0) {
-            fprintf(stream, " (none)");
+            fprintf(stream, "(none)");
         } else {
             for (size_t j = 0; j < block->pred_count; j++) {
-                fprintf(stream, " %zu", block->preds[j]->id);
+                fprintf(stream, "%zu%s", block->preds[j]->id, j < block->pred_count - 1 ? ", " : "");
             }
         }
         fprintf(stream, "\n");
 
-        fprintf(stream, "  Successors:");
+        fprintf(stream, "  Successors: ");
         if (block->succ_count == 0) {
-            fprintf(stream, " (none)");
+            fprintf(stream, "(none)");
         } else {
             for (size_t j = 0; j < block->succ_count; j++) {
-                fprintf(stream, " %zu", block->succs[j]->id);
+                fprintf(stream, "%zu%s", block->succs[j]->id, j < block->succ_count - 1 ? ", " : "");
             }
         }
-        fprintf(stream, "\n\n");
+        fprintf(stream, "\n\n"); // Add an extra newline for spacing between blocks
     }
 }
 
@@ -587,7 +563,7 @@ void generate_dot_file(CFG *cfg, const char *filename) {
             char stmt_buffer[256] = {0};
             FILE *stmt_stream = fmemopen(stmt_buffer, sizeof(stmt_buffer), "w");
             if (stmt_stream) {
-                print_ast_to_stream(block->stmts[j], 0, stmt_stream);
+                print_ast_node_for_cfg(block->stmts[j], 0, stmt_stream);
                 fclose(stmt_stream);
             }
             fprintf(file, "%s", stmt_buffer);

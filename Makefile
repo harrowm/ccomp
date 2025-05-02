@@ -22,11 +22,19 @@ test_lexer: lexer.c lexer.h test_lexer.c minunit.h
 test_parser: parser.c parser.h test_parser.c lexer.c lexer.h ast.h minunit.h
 	$(CC) $(CFLAGS) -o test_parser parser.c lexer.c test_parser.c
 
+test_cfg: cfg.c cfg.h test_cfg.c lexer.c lexer.h parser.c parser.h ast.h minunit.h
+	$(CC) $(CFLAGS) -o test_cfg cfg.c lexer.c parser.c test_cfg.c
+
+test_dominance: dominance.c cfg.c cfg.h test_dominance.c lexer.c lexer.h parser.c parser.h ast.h minunit.h
+	$(CC) $(CFLAGS) -o test_dominance dominance.c cfg.c lexer.c parser.c test_dominance.c
+
 .PHONY: test coverage
 
-test: test_lexer test_parser
+test: test_lexer test_parser test_cfg test_dominance
 	./test_lexer
 	./test_parser
+	./test_cfg
+	./test_dominance
 
 coverage: test
 	lcov --capture --directory . --output-file coverage.info
@@ -37,4 +45,4 @@ coverage: test
 #    brew install lcov
 
 clean:
-	rm -f $(OBJ) $(TEST_OBJ) compiler test_lexer test_parser cfg.png df.png cfg_with_phi.png *.gcda *.gcno coverage.info
+	rm -f $(OBJ) $(TEST_OBJ) compiler test_lexer test_parser test_cfg test_dominance cfg.png df.png cfg_with_phi.png *.gcda *.gcno coverage.info

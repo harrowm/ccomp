@@ -1,0 +1,11 @@
+digraph DominanceFrontiers {
+  node [shape=ellipse];
+  Block0 [label="Block 0"];
+  Block1 [label="Block 1"];
+  Block2 [label="Block 2"];
+  Block3 [label="Block 3"];
+  Block4 [label="Block 4"];
+  Block5 [label="Block 5"];
+  Block3 -> Block5;
+  Block4 -> Block5;
+}

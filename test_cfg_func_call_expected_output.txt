@@ -1,0 +1,38 @@
+Control Flow Graph:
+==================
+Block 0 (Entry Block):
+  Statements:
+    (none)
+  Predecessors: (none)
+  Successors: 2, 3
+
+Block 1 (Exit Block):
+  Statements:
+    (none)
+  Predecessors: 2, 3
+  Successors: (none)
+
+Block 2 (Normal Block):
+  Statements:
+    - Return
+      BinaryOp: PLUS
+      Left:
+        VarRef: a
+
+      Right:
+        Literal: 1
+  Predecessors: 0
+  Successors: 1
+
+Block 3 (Normal Block):
+  Statements:
+    - VarDecl: x
+      Initializer:
+        FunctionCall: foo
+        Arguments:
+          Literal: 42
+    - Return
+      VarRef: x
+  Predecessors: 0
+  Successors: 1
+

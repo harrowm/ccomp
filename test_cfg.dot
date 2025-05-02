@@ -1,0 +1,33 @@
+digraph CFG {
+  node [shape=box];
+  Block0 [label="Block 0\nType: Entry Block"];
+  Block1 [label="Block 1\nType: Exit Block"];
+  Block2 [label="Block 2\nType: Normal Block\nStmt 0: VarDecl: x
+Initializer:
+  Literal: 42
+\nStmt 1: BinaryOp: GT
+Left:
+  VarRef: x
+
+Right:
+  Literal: 0
+"];
+  Block3 [label="Block 3\nType: If-Then Block\nStmt 0: Assignment: x
+BinaryOp: MINUS
+Left:
+  VarRef: x
+
+Right:
+  Literal: 1
+"];
+  Block4 [label="Block 4\nType: If-Else Block"];
+  Block5 [label="Block 5\nType: Normal Block\nStmt 0: Return
+VarRef: x
+"];
+  Block0 -> Block2;
+  Block2 -> Block3;
+  Block2 -> Block4;
+  Block3 -> Block5;
+  Block4 -> Block5;
+  Block5 -> Block1;
+}
