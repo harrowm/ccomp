@@ -34,3 +34,9 @@ jobs:
 
       - name: Run CFG tests
         run: ./test_cfg
+
+      - name: Build dominance tests
+        run: make test_dominance
+
+      - name: Run dominance tests
+        run: ./test_dominance
