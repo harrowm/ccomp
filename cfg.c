@@ -115,6 +115,13 @@ static void process_statement(CFG *cfg, BasicBlock **current_block, ASTNode *stm
 
     switch (stmt->type) {
         case NODE_BINARY_OP:
+            if (!stmt->data.binary_op.left || !stmt->data.binary_op.right) {
+                LOG_ERROR("Binary operation has NULL operands: left=%p, right=%p", stmt->data.binary_op.left, stmt->data.binary_op.right);
+                return;
+            }
+            add_statement(*current_block, stmt);
+            break;
+
         case NODE_LITERAL:
         case NODE_VAR_REF:
         case NODE_VAR_DECL:
@@ -238,7 +245,7 @@ static void process_statement(CFG *cfg, BasicBlock **current_block, ASTNode *stm
 
 CFG* ast_to_cfg(ASTNode *ast) {
     if (!ast || ast->type != NODE_PROGRAM) {
-        LOG_ERROR("Invalid AST root node for CFG construction");
+        LOG_ERROR("Invalid AST root node for CFG construction: type=%s", ast ? node_type_to_string(ast->type) : "NULL");
         return NULL;
     }
 

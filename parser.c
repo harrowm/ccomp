@@ -210,6 +210,10 @@ static ASTNode *create_literal_node_with_ptr(void *ptr, Type *type) {
 }
 
 static ASTNode* create_binary_op_node(int op, ASTNode *left, ASTNode *right) {
+    LOG_INFO("Creating binary operation node: op=%s, left=%s, right=%s", 
+             token_type_to_string(op), 
+             left ? node_type_to_string(left->type) : "NULL", 
+             right ? node_type_to_string(right->type) : "NULL");
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) return NULL;
     node->type = NODE_BINARY_OP;

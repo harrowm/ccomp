@@ -81,4 +81,6 @@ void print_dominance_frontiers(CFG *cfg, FILE *stream);
 void compute_dominator_tree(CFG *cfg);
 void insert_phi_functions(CFG *cfg);
 
+const char* block_type_to_string(BlockType type);
+
 #endif // CFG_H

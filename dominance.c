@@ -140,6 +140,31 @@ void generate_dominance_frontiers_dot(CFG *cfg, const char *filename) {
 void insert_phi_functions(CFG *cfg) {
     if (!cfg) return;
 
+    LOG_INFO("Starting phi-function insertion");
+
+    for (size_t i = 0; i < cfg->block_count; i++) {
+        BasicBlock *block = cfg->blocks[i];
+        LOG_INFO("Processing block %zu", block->id);
+
+        for (size_t j = 0; j < block->stmt_count; j++) {
+            ASTNode *stmt = block->stmts[j];
+            const char *var_name = NULL;
+            if (stmt->type == NODE_VAR_DECL) {
+                var_name = stmt->data.var_decl.name;
+                LOG_INFO("Variable declaration found: %s", var_name);
+            } else if (stmt->type == NODE_ASSIGNMENT) {
+                var_name = stmt->data.assignment.name;
+                LOG_INFO("Assignment found: %s", var_name);
+            }
+
+            if (var_name) {
+                LOG_INFO("Processing variable %s for phi-function insertion", var_name);
+            }
+        }
+    }
+
+    LOG_INFO("Phi-function insertion completed");
+
     // Iterate over all blocks in the CFG
     LOG_INFO("Inserting φ-functions into CFG, block count: %zu", cfg->block_count);
     bool *has_phi = calloc(cfg->block_count, sizeof(bool));

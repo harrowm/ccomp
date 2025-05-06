@@ -1,6 +1,7 @@
 # Ignore MacOS system files
 /.DS_Store
 **/.DS_Store
+*.dSYM
 
 /coverage
 
