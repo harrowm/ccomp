@@ -27,7 +27,6 @@ typedef enum {
     NODE_FOR_STMT,
     NODE_UNARY_OP, // For unary operations like --, ++, etc.
     NODE_FUNCTION_CALL, // For function calls like foo(a, b)
-    //NODE_EXPR, // For general expressions
     INVALID_NODE_TYPE,
     UNKNOWN_NODE_TYPE
 } NodeType;
@@ -61,6 +60,7 @@ typedef union {
 
 typedef struct ASTNode {
     NodeType type;
+    char *temp_var; // Temporary variable associated with this node
     union {
         // Literal value
         struct {
@@ -159,47 +159,7 @@ typedef struct ASTNode {
             Type *type;
         } type_spec;
 
-        // Expressions
-        // struct {
-        //     ExprType op; // Expression type
-        //     union {
-        //         char *var_name; // Variable name for EXPR_VAR
-        //         struct {
-        //             LiteralValue value; // Literal value for EXPR_LITERAL
-        //         } literal;
-        //         struct {
-        //             int op; // Operator type for EXPR_BINARY_OP
-        //             struct ASTNode *left;
-        //             struct ASTNode *right;
-        //         } binary_op;
-        //         struct {
-        //             int op; // Operator type for EXPR_UNARY_OP
-        //             struct ASTNode *operand;
-        //         } unary_op;
-        //     } data;
-        // } expr;
     } data;
 } ASTNode;
-
-// Function declarations
-// ASTNode *create_literal_node(int value, Type *type);
-// ASTNode *create_binary_op_node(int op, ASTNode *left, ASTNode *right);
-// ASTNode *create_var_ref_node(const char *name, Type *type);
-// ASTNode *create_var_decl_node(const char *name, Type *type, ASTNode *init_value);
-// ASTNode *create_assignment_node(const char *name, ASTNode *value);
-// ASTNode *create_function_decl_node(const char *name, Type *return_type, ASTNode *params, ASTNode *body);
-// ASTNode *create_return_node(ASTNode *value);
-// ASTNode *create_param_list_node(ASTNode **params, size_t count);
-// ASTNode *create_stmt_list_node(ASTNode **stmts, size_t count);
-// ASTNode *create_type_spec_node(Type *type);
-
-// const char *node_type_to_string(NodeType type);
-
-// Type *create_type(TypeKind kind);
-// Type *create_pointer_type(Type *base);
-// Type *create_array_type(Type *base, size_t size);
-
-// void free_ast(ASTNode *node);
-// void print_ast(ASTNode *node, int indent);
 
 #endif // AST_H
