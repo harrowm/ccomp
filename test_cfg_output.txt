@@ -1,19 +1,19 @@
 Control Flow Graph:
 ==================
 Block 0 (Entry Block):
-  Statements:
+  Statements: count 0 capacity 0
     (none)
   Predecessors: (none)
   Successors: 2
 
 Block 1 (Exit Block):
-  Statements:
+  Statements: count 0 capacity 0
     (none)
   Predecessors: 5
   Successors: (none)
 
 Block 2 (Normal Block):
-  Statements:
+  Statements: count 2 capacity 8
     - VarDecl: x
       Initializer:
         Literal: 42
@@ -27,7 +27,7 @@ Block 2 (Normal Block):
   Successors: 3, 4
 
 Block 3 (If-Then Block):
-  Statements:
+  Statements: count 1 capacity 8
     - Assignment: x
       BinaryOp: MINUS
       Left:
@@ -39,13 +39,13 @@ Block 3 (If-Then Block):
   Successors: 5
 
 Block 4 (If-Else Block):
-  Statements:
+  Statements: count 0 capacity 0
     (none)
   Predecessors: 2
   Successors: 5
 
 Block 5 (Normal Block):
-  Statements:
+  Statements: count 1 capacity 8
     - Return
       VarRef: x
   Predecessors: 3, 4

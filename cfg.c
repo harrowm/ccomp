@@ -77,7 +77,7 @@ static void add_statement(BasicBlock *block, ASTNode *stmt) {
     }
     
     block->stmts[block->stmt_count++] = stmt;
-    LOG_INFO("Added statement to block %zu: %s", block->id, node_type_to_string(stmt->type));
+    LOG_INFO("Added statement number %zu to block %zu: %s", (block->stmt_count-1), block->id, node_type_to_string(stmt->type));
 }
 
 static void add_predecessor(BasicBlock *block, BasicBlock *pred) {
@@ -174,20 +174,20 @@ static void process_statement(CFG *cfg, BasicBlock **current_block, ASTNode *stm
             BasicBlock *header = create_basic_block(cfg, BLOCK_LOOP_HEADER);
             BasicBlock *body = create_basic_block(cfg, BLOCK_LOOP_BODY);
             BasicBlock *exit = create_basic_block(cfg, BLOCK_NORMAL);
-            
+
             // Current block flows to loop header
             add_successor(*current_block, header);
-            
+
             // Header has two successors: body and exit
             add_statement(header, stmt->data.while_stmt.condition);
             add_successor(header, body);
             add_successor(header, exit);
-            
+
             // Process body
             *current_block = body;
             process_statement(cfg, current_block, stmt->data.while_stmt.body);
             add_successor(*current_block, header); // Loop back
-            
+
             // Continue with exit block
             *current_block = exit;
             break;
@@ -514,7 +514,7 @@ void print_cfg(CFG *cfg, FILE *stream) {
         BasicBlock *block = cfg->blocks[i];
         fprintf(stream, "Block %zu (%s):\n", block->id, block_type_to_string(block->type));
 
-        fprintf(stream, "  Statements:\n");
+        fprintf(stream, "  Statements: count %zu capacity %zu\n", block->stmt_count, block->stmt_capacity);
         if (block->stmt_count == 0) {
             fprintf(stream, "    (none)\n");
         } else {

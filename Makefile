@@ -34,10 +34,10 @@ test_tac: tac.c tac.h test_tac.c cfg.c cfg.h lexer.c lexer.h parser.c parser.h d
 .PHONY: test coverage
 
 test: test_lexer test_parser test_cfg test_dominance test_tac
-	#./test_lexer
-	#./test_parser
-	#./test_cfg
-	#./test_dominance
+	./test_lexer
+	./test_parser
+	./test_cfg
+	./test_dominance
 	./test_tac
 
 coverage: test

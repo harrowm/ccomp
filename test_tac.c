@@ -113,19 +113,19 @@ MU_TEST(test_tac_arithmetic_precedence) {
     compute_dominance_frontiers(cfg);
     insert_phi_functions(cfg);
 
-    print_cfg(cfg, stdout);
+    // print_cfg(cfg, stdout);
 
     TAC *tac = cfg_to_tac(cfg);
     mu_assert(tac != NULL, "TAC should not be NULL");
 
-    const char *expected_output = "L0:\n"
-                                  "goto L2\n"
-                                  "L2:\n"
-                                  "t200 = 3 * 5\n"
-                                  "t201 = 2 + t200\n"
-                                  "return t201\n"
-                                  "goto L1\n"
-                                  "L1:\n";
+    const char *expected_output = "L6:\n"
+                                  "goto L8\n"
+                                  "L8:\n"
+                                  "t3 = 3 * 5\n"
+                                  "t4 = 2 + t3\n"
+                                  "return t4\n"
+                                  "goto L7\n"
+                                  "L7:\n";
 
     // Redirect TAC output to a string buffer
     char actual_output[1024] = {0};
@@ -162,9 +162,88 @@ MU_TEST(test_tac_arithmetic_precedence) {
     free_ast(ast);
 }
 
+MU_TEST(test_tac_while_loop) {
+    const char *input = "int main() {\n"
+                        "  int x = 0;\n"
+                        "  while (x < 5) {\n"
+                        "    x = x + 1;\n"
+                        "  }\n"
+                        "  return x;\n"
+                        "}";
+
+    Lexer lexer;
+    lexer_init(&lexer, input);
+
+    ASTNode *ast = parse(&lexer);
+    mu_assert(ast != NULL, "AST should not be NULL");
+
+    CFG *cfg = ast_to_cfg(ast);
+    mu_assert(cfg != NULL, "CFG should not be NULL");
+
+print_cfg(cfg, stdout);
+
+    compute_dominator_tree(cfg);
+    compute_dominance_frontiers(cfg);
+    insert_phi_functions(cfg);
+
+    print_cfg(cfg, stdout);
+
+
+    TAC *tac = cfg_to_tac(cfg);
+    mu_assert(tac != NULL, "TAC should not be NULL");
+
+    const char *expected_output = "L9:\n"
+                                  "goto L11\n"
+                                  "L11:\n"
+                                  "x = 0\n"
+                                  "goto L12\n"
+                                  "L12:\n"
+                                  "x = phi(...)\n"
+                                  "t5 = x < 5\n"
+                                  "if not t5 goto L14\n"
+                                  "L13:\n"
+                                  "t6 = x + 1\n"
+                                  "x = t6\n"
+                                  "goto L12\n"
+                                  "L14:\n"
+                                  "return x\n"
+                                  "goto L10\n"
+                                  "L10:\n";
+
+    char actual_output[1024] = {0};
+    FILE *output_stream = fmemopen(actual_output, sizeof(actual_output), "w");
+    print_tac(tac, output_stream);
+    fclose(output_stream);
+
+print_tac(tac, stdout);
+
+    char *expected_ptr = (char *)expected_output;
+    char *actual_ptr = actual_output;
+    while (*expected_ptr && *actual_ptr) {
+        char expected_line[256] = {0};
+        char actual_line[256] = {0};
+
+        sscanf(expected_ptr, "%255[^\n]\n", expected_line);
+        expected_ptr += strlen(expected_line) + 1;
+
+        sscanf(actual_ptr, "%255[^\n]\n", actual_line);
+        actual_ptr += strlen(actual_line) + 1;
+
+        if (strcmp(expected_line, actual_line) != 0) {
+            fprintf(stderr, "Mismatch: Actual: '%s' | Expected: '%s'\n", actual_line, expected_line);
+        }
+        mu_assert(strcmp(expected_line, actual_line) == 0, "TAC output mismatch");
+    }
+
+    free_tac(tac);
+    free_cfg(cfg);
+    free_ast(ast);
+}
+
 MU_TEST_SUITE(tac_suite) {
     MU_RUN_TEST(test_tac_with_phi_function);
     MU_RUN_TEST(test_tac_arithmetic_precedence);
+    MU_RUN_TEST(test_tac_while_loop);
 }
 
 int main(int argc, char **argv) {

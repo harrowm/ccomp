@@ -298,13 +298,18 @@ static void process_statement(ASTNode *stmt, BasicBlock *block, size_t stmt_inde
             } else {
                 NodeValue init_value = extract_node_value(stmt->data.var_decl.init_value);
                 if (init_value.type == NODE_TYPE_LITERAL) {
-                    new_tac = create_tac(TAC_ASSIGN, stmt->data.var_decl.name, NULL, NULL, NULL, NULL);
-                    new_tac->int_value = atoi(init_value.data.string_value);
+                    new_tac = create_tac(TAC_ASSIGN, stmt->data.var_decl.name, init_value.data.string_value, NULL, NULL, NULL);
                 } else if (init_value.type == NODE_TYPE_VAR_REF) {
                     new_tac = create_tac(TAC_ASSIGN, stmt->data.var_decl.name, init_value.data.string_value, NULL, NULL, NULL);
                 } else {
                     LOG_ERROR("Unsupported initializer type for variable declaration");
                 }
+            }
+
+            if (new_tac) {
+                (*tail)->next = new_tac;
+                *tail = new_tac;
+                LOG_INFO("Linked TAC for variable declaration: %s", stmt->data.var_decl.name);
             }
             break;
 
@@ -369,10 +374,10 @@ static void process_statement(ASTNode *stmt, BasicBlock *block, size_t stmt_inde
                 (*tail)->next = new_tac;
                 *tail = new_tac;
 
+                LOG_INFO("Generated TAC for binary operation: %s = %s %s %s", temp_var, left_operand, op, right_operand);
+
                 free(left_operand);
                 free(right_operand);
-
-                LOG_INFO("Generated TAC for binary operation: %s = %s %s %s", temp_var, left_operand, op, right_operand);
             } else {
                 LOG_ERROR("Binary operation has NULL operands");
             }
@@ -429,8 +434,13 @@ static void process_statement(ASTNode *stmt, BasicBlock *block, size_t stmt_inde
             }
             break;
 
+        // dont need to process these 
+        case NODE_LITERAL:
+        case NODE_VAR_REF:
+            break;
+
         default:
-            LOG_INFO("Unsupported AST node type in CFG to TAC conversion: %d", stmt->type);
+            LOG_INFO("Unsupported AST node type in CFG to TAC conversion: %d - %s", stmt->type, cfg_node_type_to_string(stmt->type));
             break;
     }
 
@@ -451,7 +461,7 @@ static void traverse_cfg(BasicBlock *block, bool *visited, TAC **head, TAC **tai
 
     // Retrieve the preassigned label for the block
     int label = get_block_label(block->id);
-    LOG_INFO("Adding label: L%d", label);
+    LOG_INFO("Adding block label: L%d", label);
     TAC *label_tac = create_tac(TAC_LABEL, NULL, NULL, NULL, NULL, &label);
     if (!*head) {
         *head = *tail = label_tac;
@@ -493,9 +503,63 @@ static void traverse_cfg(BasicBlock *block, bool *visited, TAC **head, TAC **tai
         }
     }
 
+    if (block->type == BLOCK_LOOP_HEADER) {
+        // Skip phi functions (VarDecl with no initializer)
+        size_t stmt_index = 0;
+        while (stmt_index < block->stmt_count &&
+               block->stmts[stmt_index]->type == NODE_VAR_DECL &&
+               block->stmts[stmt_index]->data.var_decl.init_value == NULL) {
+            LOG_INFO("Detected φ-function for variable: %s", block->stmts[stmt_index]->data.var_decl.name);
+            TAC *new_tac = create_tac(TAC_PHI, block->stmts[stmt_index]->data.var_decl.name, NULL, NULL, NULL, NULL);
+            (*tail)->next = new_tac;
+            *tail = new_tac;
+            stmt_index++;
+        }
+
+        // Ensure there is a condition to process
+        if (stmt_index >= block->stmt_count) {
+            LOG_ERROR("No condition found in loop header block");
+            return;
+        }
+
+        // Process the condition (BinaryOp or expression)
+        ASTNode *condition_stmt = block->stmts[stmt_index];
+        if (condition_stmt->type == NODE_BINARY_OP || condition_stmt->temp_var) {
+            process_statement(condition_stmt, block, stmt_index, tail);
+
+            // Use the resulting temp_var to generate the `if not` statement
+            const char *temp_var = condition_stmt->temp_var;
+            if (!temp_var) {
+                LOG_ERROR("Condition variable not set after processing condition statement");
+                return;
+            }
+
+            int exit_label = get_block_label(block->succs[1]->id); // Exit block is the second successor
+            TAC *if_not_tac = create_tac(TAC_IF_GOTO, NULL, temp_var, NULL, NULL, &exit_label);
+            LOG_INFO("Adding if-not TAC for loop condition: L%d", exit_label);
+            (*tail)->next = if_not_tac;
+            *tail = if_not_tac;
+        } else {
+            LOG_ERROR("Unsupported condition type in loop header block");
+        }
+    }
+
     // Process statements in the block
-    for (size_t j = 0; j < block->stmt_count; j++) {
-        process_statement(block->stmts[j], block, j, tail);
+    if (block->type != BLOCK_LOOP_HEADER) {
+        for (size_t j = 0; j < block->stmt_count; j++) {
+            ASTNode *stmt = block->stmts[j];
+            if (stmt->type == NODE_BINARY_OP) {
+                LOG_INFO("Binary operation detected in CFG");
+                if (stmt->temp_var) {
+                    LOG_INFO("Using temp_var for BinaryOp: %s", stmt->temp_var);
+                } else {
+                    LOG_ERROR("temp_var for BinaryOp is NULL");
+                }
+                // Ensure temp_var is propagated to the CFG
+                block->stmts[j]->temp_var = stmt->temp_var;
+            }
+            process_statement(stmt, block, j, tail);
+        }
     }
 
     // Ensure a jump to the successor block for non IF / ELSE blocks
