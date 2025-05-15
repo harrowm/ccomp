@@ -215,7 +215,83 @@ print_cfg(cfg, stdout);
     print_tac(tac, output_stream);
     fclose(output_stream);
 
-print_tac(tac, stdout);
+    char *expected_ptr = (char *)expected_output;
+    char *actual_ptr = actual_output;
+    while (*expected_ptr && *actual_ptr) {
+        char expected_line[256] = {0};
+        char actual_line[256] = {0};
+
+        sscanf(expected_ptr, "%255[^\n]\n", expected_line);
+        expected_ptr += strlen(expected_line) + 1;
+
+        sscanf(actual_ptr, "%255[^\n]\n", actual_line);
+        actual_ptr += strlen(actual_line) + 1;
+
+        if (strcmp(expected_line, actual_line) != 0) {
+            fprintf(stderr, "Mismatch: Actual: '%s' | Expected: '%s'\n", actual_line, expected_line);
+        }
+        mu_assert(strcmp(expected_line, actual_line) == 0, "TAC output mismatch");
+    }
+
+    free_tac(tac);
+    free_cfg(cfg);
+    free_ast(ast);
+}
+
+MU_TEST(test_tac_for_loop) {
+    const char *input = "int main() {\n"
+                        "  int sum = 0;\n"
+                        "  for (int i = 0; i < 5; i = i + 1) {\n"
+                        "    sum = sum + i;\n"
+                        "  }\n"
+                        "  return sum;\n"
+                        "}";
+
+    Lexer lexer;
+    lexer_init(&lexer, input);
+
+    ASTNode *ast = parse(&lexer);
+    mu_assert(ast != NULL, "AST should not be NULL");
+
+    CFG *cfg = ast_to_cfg(ast);
+    mu_assert(cfg != NULL, "CFG should not be NULL");
+
+    compute_dominator_tree(cfg);
+    compute_dominance_frontiers(cfg);
+    insert_phi_functions(cfg);
+
+    TAC *tac = cfg_to_tac(cfg);
+    mu_assert(tac != NULL, "TAC should not be NULL");
+
+    print_cfg(cfg, stdout);
+    print_tac(tac, stdout);
+
+    const char *expected_output = "L15:\n"
+                                  "goto L17\n"
+                                  "L17:\n"
+                                  "sum = 0\n"
+                                  "i = 0\n"
+                                  "goto L18\n"
+                                  "L18:\n"
+                                  "i = phi(...)\n"
+                                  "sum = phi(...)\n"
+                                  "t7 = i < 5\n"
+                                  "if not t7 goto L20\n"
+                                  "L19:\n"
+                                  "t8 = sum + i\n"
+                                  "sum = t8\n"
+                                  "t9 = i + 1\n"
+                                  "i = t9\n"
+                                  "goto L18\n"
+                                  "L20:\n"
+                                  "return sum\n"
+                                  "goto L16\n"
+                                  "L16:\n";
+
+    char actual_output[1024] = {0};
+    FILE *output_stream = fmemopen(actual_output, sizeof(actual_output), "w");
+    print_tac(tac, output_stream);
+    fclose(output_stream);
 
     char *expected_ptr = (char *)expected_output;
     char *actual_ptr = actual_output;
@@ -244,6 +320,7 @@ MU_TEST_SUITE(tac_suite) {
     MU_RUN_TEST(test_tac_with_phi_function);
     MU_RUN_TEST(test_tac_arithmetic_precedence);
     MU_RUN_TEST(test_tac_while_loop);
+    MU_RUN_TEST(test_tac_for_loop);
 }
 
 int main(int argc, char **argv) {

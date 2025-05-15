@@ -136,42 +136,40 @@ void generate_dominance_frontiers_dot(CFG *cfg, const char *filename) {
     LOG_INFO("Dominance frontiers DOT file generated: %s", filename);
 }
 
+// Helper to check if a variable already has a phi in a block
+static int has_phi_var(char **block_phi_vars, size_t block_phi_var_count, const char *var) {
+    for (size_t _i = 0; _i < block_phi_var_count; _i++) {
+        if (strcmp(block_phi_vars[_i], var) == 0) return 1;
+    }
+    return 0;
+}
+
+// Helper to add a variable to the phi set for a block
+static void add_phi_var(char ***block_phi_vars, size_t *block_phi_var_count, size_t *block_phi_var_cap, const char *var) {
+    if (*block_phi_var_count == *block_phi_var_cap) {
+        size_t new_cap = *block_phi_var_cap ? *block_phi_var_cap * 2 : 4;
+        *block_phi_vars = realloc(*block_phi_vars, new_cap * sizeof(char*));
+        *block_phi_var_cap = new_cap;
+    }
+    (*block_phi_vars)[(*block_phi_var_count)++] = strdup(var);
+}
+
 // Insert φ-functions into the appropriate blocks based on dominance frontiers
 void insert_phi_functions(CFG *cfg) {
     if (!cfg) return;
 
     LOG_INFO("Starting phi-function insertion");
 
-    for (size_t i = 0; i < cfg->block_count; i++) {
-        BasicBlock *block = cfg->blocks[i];
-        LOG_INFO("Processing block %zu", block->id);
+    // Track which variables have phi functions in each block
+    // We'll use a dynamic array of variable names per block
+    char ***block_phi_vars = calloc(cfg->block_count, sizeof(char **));
+    size_t *block_phi_var_counts = calloc(cfg->block_count, sizeof(size_t));
+    size_t *block_phi_var_caps = calloc(cfg->block_count, sizeof(size_t));
 
-        for (size_t j = 0; j < block->stmt_count; j++) {
-            ASTNode *stmt = block->stmts[j];
-            const char *var_name = NULL;
-            if (stmt->type == NODE_VAR_DECL) {
-                var_name = stmt->data.var_decl.name;
-                LOG_INFO("Variable declaration found: %s", var_name);
-            } else if (stmt->type == NODE_ASSIGNMENT) {
-                var_name = stmt->data.assignment.name;
-                LOG_INFO("Assignment found: %s", var_name);
-            }
-
-            if (var_name) {
-                LOG_INFO("Processing variable %s for phi-function insertion", var_name);
-            }
-        }
-    }
-
-    LOG_INFO("Phi-function insertion completed");
-
-    // Iterate over all blocks in the CFG
-    LOG_INFO("Inserting φ-functions into CFG, block count: %zu", cfg->block_count);
-    bool *has_phi = calloc(cfg->block_count, sizeof(bool));
-    bool *work = calloc(cfg->block_count, sizeof(bool));
-
-    // Refine φ-function insertion logic to only insert in dominance frontiers
-    LOG_INFO("Initializing worklist for φ-function propagation");
+    // Collect all variables assigned anywhere in the CFG
+    // (This is a simple approach; for large CFGs, use a set)
+    char **all_vars = NULL;
+    size_t all_vars_count = 0, all_vars_cap = 0;
     for (size_t i = 0; i < cfg->block_count; i++) {
         BasicBlock *block = cfg->blocks[i];
         for (size_t j = 0; j < block->stmt_count; j++) {
@@ -182,108 +180,97 @@ void insert_phi_functions(CFG *cfg) {
             } else if (stmt->type == NODE_ASSIGNMENT) {
                 var_name = stmt->data.assignment.name;
             }
-
             if (var_name) {
-                LOG_INFO("Variable %s defined in block %zu", var_name, i);
-                memset(work, 0, sizeof(bool) * cfg->block_count);
-                work[i] = true;
-
-                while (true) {
-                    bool changed = false;
-                    for (size_t k = 0; k < cfg->block_count; k++) {
-                        if (!work[k]) continue;
-                        work[k] = false;
-
-                        BasicBlock *current_block = cfg->blocks[k];
-                        LOG_INFO("Processing block %zu for φ-function propagation", k);
-
-                        // Adjust the algorithm to consider blocks dominated by the current block
-                        LOG_INFO("Processing blocks dominated by block %zu", k);
-                        for (size_t l = 0; l < current_block->dominated_count; l++) {
-                            size_t dominated_block_id = current_block->dominated[l]->id;
-                            LOG_INFO("Checking dominated block %zu of block %zu", dominated_block_id, k);
-
-                            // Ensure φ-functions are inserted only in blocks where control flow merges
-                            BasicBlock *dominated_block = cfg->blocks[dominated_block_id];
-                            for (size_t m = 0; m < dominated_block->pred_count; m++) {
-                                if (dominated_block->preds[m] != current_block) {
-                                    LOG_INFO("Block %zu has multiple predecessors, inserting φ-function for variable %s", dominated_block_id, var_name);
-
-                                    if (!has_phi[dominated_block_id]) {
-                                        has_phi[dominated_block_id] = true;
-                                        work[dominated_block_id] = true; // Add to worklist for further processing
-                                        changed = true; // Ensure the loop continues
-
-                                        // Insert φ-function for the variable in dominated_block_id
-                                        ASTNode *phi_node = malloc(sizeof(ASTNode));
-                                        phi_node->type = NODE_VAR_DECL; // Represent φ-function as a variable declaration
-                                        phi_node->data.var_decl.name = strdup(var_name);
-                                        phi_node->data.var_decl.type = NULL; // Type can be resolved later
-                                        phi_node->data.var_decl.init_value = NULL; // φ-functions have no initial value
-
-                                        if (dominated_block->stmt_count >= dominated_block->stmt_capacity) {
-                                            size_t new_capacity = dominated_block->stmt_capacity == 0 ? 8 : dominated_block->stmt_capacity * 2;
-                                            dominated_block->stmts = realloc(dominated_block->stmts, sizeof(ASTNode *) * new_capacity);
-                                            dominated_block->stmt_capacity = new_capacity;
-                                        }
-                                        // Insert φ-function as the first instruction in the block
-                                        for (size_t i = dominated_block->stmt_count; i > 0; i--) {
-                                            dominated_block->stmts[i] = dominated_block->stmts[i - 1];
-                                        }
-                                        dominated_block->stmts[0] = phi_node;
-                                        dominated_block->stmt_count++;
-                                        LOG_INFO("φ-function for variable %s successfully inserted in block %zu", var_name, dominated_block_id);
-                                    } else {
-                                        LOG_INFO("Block %zu already has a φ-function for variable %s, skipping.", dominated_block_id, var_name);
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-
-                        for (size_t l = 0; l < current_block->dom_frontier->count; l++) {
-                            size_t df_block_id = current_block->dom_frontier->blocks[l]->id;
-                            LOG_INFO("Checking dominance frontier block %zu for block %zu", df_block_id, k);
-                            if (!has_phi[df_block_id]) {
-                                has_phi[df_block_id] = true;
-                                work[df_block_id] = true;
-                                changed = true;
-
-                                LOG_INFO("Inserting φ-function for variable %s in block %zu", var_name, df_block_id);
-                                BasicBlock *df_block = cfg->blocks[df_block_id];
-                                ASTNode *phi_node = malloc(sizeof(ASTNode));
-                                phi_node->type = NODE_VAR_DECL;
-                                phi_node->data.var_decl.name = strdup(var_name);
-                                phi_node->data.var_decl.type = NULL;
-                                phi_node->data.var_decl.init_value = NULL;
-
-                                if (df_block->stmt_count >= df_block->stmt_capacity) {
-                                    size_t new_capacity = df_block->stmt_capacity == 0 ? 8 : df_block->stmt_capacity * 2;
-                                    df_block->stmts = realloc(df_block->stmts, sizeof(ASTNode *) * new_capacity);
-                                    df_block->stmt_capacity = new_capacity;
-                                }
-                                // Insert φ-function as the first instruction in the block
-                                for (size_t i = df_block->stmt_count; i > 0; i--) {
-                                    df_block->stmts[i] = df_block->stmts[i - 1];
-                                }
-                                df_block->stmts[0] = phi_node;
-                                df_block->stmt_count++;
-                                LOG_INFO("φ-function for variable %s successfully inserted in block %zu", var_name, df_block_id);
-                            } else {
-                                LOG_INFO("Block %zu already has a φ-function for variable %s, skipping", df_block_id, var_name);
-                            }
-                        }
+                // Add to all_vars if not already present
+                int found = 0;
+                for (size_t k = 0; k < all_vars_count; k++) {
+                    if (strcmp(all_vars[k], var_name) == 0) { found = 1; break; }
+                }
+                if (!found) {
+                    if (all_vars_count == all_vars_cap) {
+                        size_t new_cap = all_vars_cap ? all_vars_cap * 2 : 8;
+                        all_vars = realloc(all_vars, new_cap * sizeof(char*));
+                        all_vars_cap = new_cap;
                     }
-
-                    if (!changed) {
-                        LOG_INFO("No changes detected, exiting worklist processing loop for variable %s", var_name);
-                        break;
-                    }
+                    all_vars[all_vars_count++] = strdup(var_name);
                 }
             }
         }
     }
 
-    free(has_phi);
-    free(work);
+    // For each variable, insert phi functions in its dominance frontier blocks
+    for (size_t v = 0; v < all_vars_count; v++) {
+        const char *var = all_vars[v];
+        // 1. Collect all blocks that assign to var
+        int *assign_blocks = calloc(cfg->block_count, sizeof(int));
+        for (size_t i = 0; i < cfg->block_count; i++) {
+            BasicBlock *block = cfg->blocks[i];
+            for (size_t j = 0; j < block->stmt_count; j++) {
+                ASTNode *stmt = block->stmts[j];
+                const char *var_name = NULL;
+                if (stmt->type == NODE_VAR_DECL) {
+                    var_name = stmt->data.var_decl.name;
+                } else if (stmt->type == NODE_ASSIGNMENT) {
+                    var_name = stmt->data.assignment.name;
+                }
+                if (var_name && strcmp(var_name, var) == 0) {
+                    assign_blocks[i] = 1;
+                    break;
+                }
+            }
+        }
+        // 2. Build a set of all blocks in the dominance frontier of any assign block (phi_blocks)
+        int *phi_blocks = calloc(cfg->block_count, sizeof(int));
+        for (size_t i = 0; i < cfg->block_count; i++) {
+            if (!assign_blocks[i]) continue;
+            BasicBlock *block = cfg->blocks[i];
+            if (!block->dom_frontier) continue;
+            for (size_t j = 0; j < block->dom_frontier->count; j++) {
+                BasicBlock *df_block = block->dom_frontier->blocks[j];
+                phi_blocks[df_block->id] = 1;
+            }
+        }
+        // 3. Insert phi for var in each phi_block (only once)
+        for (size_t i = 0; i < cfg->block_count; i++) {
+            if (!phi_blocks[i]) continue;
+            if (!has_phi_var(block_phi_vars[i], block_phi_var_counts[i], var)) {
+                BasicBlock *df_block = cfg->blocks[i];
+                ASTNode *phi_node = malloc(sizeof(ASTNode));
+                phi_node->type = NODE_VAR_DECL; // Represent φ-function as a variable declaration
+                phi_node->data.var_decl.name = strdup(var);
+                phi_node->data.var_decl.type = NULL;
+                phi_node->data.var_decl.init_value = NULL;
+                if (df_block->stmt_count >= df_block->stmt_capacity) {
+                    size_t new_capacity = df_block->stmt_capacity == 0 ? 8 : df_block->stmt_capacity * 2;
+                    df_block->stmts = realloc(df_block->stmts, sizeof(ASTNode *) * new_capacity);
+                    df_block->stmt_capacity = new_capacity;
+                }
+                // Insert phi at the start, but only once per variable per block
+                for (size_t k = df_block->stmt_count; k > 0; k--) {
+                    df_block->stmts[k] = df_block->stmts[k - 1];
+                }
+                df_block->stmts[0] = phi_node;
+                df_block->stmt_count++;
+                add_phi_var(&block_phi_vars[i], &block_phi_var_counts[i], &block_phi_var_caps[i], var);
+                LOG_INFO("Inserted φ-function for variable %s in block %zu", var, (size_t)i);
+            }
+        }
+        free(assign_blocks);
+        free(phi_blocks);
+    }
+
+    // Free temp structures
+    for (size_t i = 0; i < cfg->block_count; i++) {
+        for (size_t j = 0; j < block_phi_var_counts[i]; j++) {
+            free(block_phi_vars[i][j]);
+        }
+        free(block_phi_vars[i]);
+    }
+    free(block_phi_vars);
+    free(block_phi_var_counts);
+    free(block_phi_var_caps);
+    for (size_t i = 0; i < all_vars_count; i++) free(all_vars[i]);
+    free(all_vars);
+
+    LOG_INFO("Phi-function insertion completed");
 }

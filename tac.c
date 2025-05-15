@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h> // For boolean type
+#include <stddef.h>  // For size_t
 
 // Linear hash table for variable stacks
 #define HASH_TABLE_SIZE 1024
@@ -284,6 +286,27 @@ static void generate_unique_var_name(char *buffer, size_t buffer_size, const cha
     snprintf(buffer, buffer_size, "%s%d", prefix, unique_counter++);
 }
 
+// Helper function to check if a variable is already in the set
+static bool is_var_in_set(const char **set, size_t set_size, const char *var_name) {
+    for (size_t i = 0; i < set_size; i++) {
+        if (strcmp(set[i], var_name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Helper function to add a variable to the set
+static void add_var_to_set(const char **set, size_t *set_size, size_t set_capacity, const char *var_name) {
+    if (*set_size < set_capacity) {
+        set[*set_size] = var_name;
+        (*set_size)++;
+    } else {
+        fprintf(stderr, "Error: Variable set capacity exceeded\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
 // Updated process_statement to include binary operation handling
 static void process_statement(ASTNode *stmt, BasicBlock *block, size_t stmt_index, TAC **tail) {
     LOG_INFO("Processing statement %zu in block %zu of type %s", stmt_index, block->id, cfg_node_type_to_string(stmt->type));
@@ -503,61 +526,50 @@ static void traverse_cfg(BasicBlock *block, bool *visited, TAC **head, TAC **tai
         }
     }
 
-    if (block->type == BLOCK_LOOP_HEADER) {
-        // Skip phi functions (VarDecl with no initializer)
+    // Emit phi functions at the top of the block for both BLOCK_IF_THEN and BLOCK_LOOP_HEADER
+    if (block->type == BLOCK_IF_THEN || block->type == BLOCK_LOOP_HEADER) {
+        const char *processed_vars[1024];
+        size_t processed_vars_count = 0;
         size_t stmt_index = 0;
         while (stmt_index < block->stmt_count &&
                block->stmts[stmt_index]->type == NODE_VAR_DECL &&
                block->stmts[stmt_index]->data.var_decl.init_value == NULL) {
-            LOG_INFO("Detected φ-function for variable: %s", block->stmts[stmt_index]->data.var_decl.name);
-            TAC *new_tac = create_tac(TAC_PHI, block->stmts[stmt_index]->data.var_decl.name, NULL, NULL, NULL, NULL);
-            (*tail)->next = new_tac;
-            *tail = new_tac;
+            const char *var_name = block->stmts[stmt_index]->data.var_decl.name;
+            if (!is_var_in_set(processed_vars, processed_vars_count, var_name)) {
+                LOG_INFO("Detected φ-function for variable: %s", var_name);
+                TAC *phi_tac = create_tac(TAC_PHI, var_name, NULL, NULL, NULL, NULL);
+                (*tail)->next = phi_tac;
+                *tail = phi_tac;
+                add_var_to_set(processed_vars, &processed_vars_count, 1024, var_name);
+            } else {
+                LOG_INFO("Skipping duplicate φ-function for variable: %s", var_name);
+            }
             stmt_index++;
         }
-
-        // Ensure there is a condition to process
-        if (stmt_index >= block->stmt_count) {
-            LOG_ERROR("No condition found in loop header block");
-            return;
+        // Emit the rest of the statements (including the loop condition and body)
+        for (size_t j = stmt_index; j < block->stmt_count; j++) {
+            ASTNode *stmt = block->stmts[j];
+            process_statement(stmt, block, j, tail);
         }
-
-        // Process the condition (BinaryOp or expression)
-        ASTNode *condition_stmt = block->stmts[stmt_index];
-        if (condition_stmt->type == NODE_BINARY_OP || condition_stmt->temp_var) {
-            process_statement(condition_stmt, block, stmt_index, tail);
-
-            // Use the resulting temp_var to generate the `if not` statement
-            const char *temp_var = condition_stmt->temp_var;
-            if (!temp_var) {
-                LOG_ERROR("Condition variable not set after processing condition statement");
-                return;
+        // Emit conditional jump for loop header (while/for)
+        if (block->type == BLOCK_LOOP_HEADER && block->stmt_count > 0 && block->succ_count == 2) {
+            // Convention: last statement is the condition, succs[1] is the exit block
+            ASTNode *cond_stmt = block->stmts[block->stmt_count - 1];
+            const char *cond_var = cond_stmt->temp_var;
+            if (cond_var) {
+                int exit_label = get_block_label(block->succs[1]->id);
+                TAC *if_goto_tac = create_tac(TAC_IF_GOTO, NULL, cond_var, NULL, NULL, &exit_label);
+                LOG_INFO("Adding if-goto TAC for loop condition: L%d", exit_label);
+                (*tail)->next = if_goto_tac;
+                *tail = if_goto_tac;
+            } else {
+                LOG_ERROR("Loop header: Condition variable not set in last statement");
             }
-
-            int exit_label = get_block_label(block->succs[1]->id); // Exit block is the second successor
-            TAC *if_not_tac = create_tac(TAC_IF_GOTO, NULL, temp_var, NULL, NULL, &exit_label);
-            LOG_INFO("Adding if-not TAC for loop condition: L%d", exit_label);
-            (*tail)->next = if_not_tac;
-            *tail = if_not_tac;
-        } else {
-            LOG_ERROR("Unsupported condition type in loop header block");
         }
-    }
-
-    // Process statements in the block
-    if (block->type != BLOCK_LOOP_HEADER) {
+    } else {
+        // Process statements in the block (for non-loop-header, non-if-then blocks)
         for (size_t j = 0; j < block->stmt_count; j++) {
             ASTNode *stmt = block->stmts[j];
-            if (stmt->type == NODE_BINARY_OP) {
-                LOG_INFO("Binary operation detected in CFG");
-                if (stmt->temp_var) {
-                    LOG_INFO("Using temp_var for BinaryOp: %s", stmt->temp_var);
-                } else {
-                    LOG_ERROR("temp_var for BinaryOp is NULL");
-                }
-                // Ensure temp_var is propagated to the CFG
-                block->stmts[j]->temp_var = stmt->temp_var;
-            }
             process_statement(stmt, block, j, tail);
         }
     }
