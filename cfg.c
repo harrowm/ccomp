@@ -44,6 +44,8 @@ static BasicBlock* create_basic_block(CFG *cfg, BlockType type) {
     block->dominated_count = 0;
     block->dominated_capacity = 0;
 
+    block->function_name = NULL; // Initialize function_name to NULL
+
     LOG_INFO("Created basic block %zu of type %d", block->id, type);
     
     // Add to CFG
@@ -271,6 +273,9 @@ CFG* ast_to_cfg(ASTNode *ast) {
 
         // Create a new block for the function body
         BasicBlock *func_block = create_basic_block(cfg, BLOCK_NORMAL);
+        if (func->data.function_decl.name) {
+            func_block->function_name = strdup(func->data.function_decl.name);
+        }
         add_successor(cfg->entry, func_block);
 
         // Process function body

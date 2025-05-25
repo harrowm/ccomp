@@ -58,6 +58,8 @@ typedef struct BasicBlock {
     struct BasicBlock **dominated; // Array of blocks dominated by this block
     size_t dominated_count;       // Number of blocks dominated
     size_t dominated_capacity;    // Capacity of the dominated array
+
+    char *function_name; // Name of the function this block belongs to (set for function entry blocks)
 } BasicBlock;
 
 typedef struct {

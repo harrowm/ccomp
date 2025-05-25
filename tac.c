@@ -268,8 +268,6 @@ static char *extract_node_value_as_string(ASTNode *node) {
             strncpy(result, node->temp_var, 32);
         } else {
             LOG_ERROR("Binary operation node reached without temp_var set");
-            // free(result);
-            // exit(EXIT_FAILURE);
         }
     } else {
         LOG_ERROR("Unsupported node type: %s", node_type_to_string(node->type));
@@ -318,6 +316,22 @@ static void process_statement(ASTNode *stmt, BasicBlock *block, size_t stmt_inde
             if (stmt->data.var_decl.init_value == NULL) {
                 LOG_INFO("Detected φ-function for variable: %s", stmt->data.var_decl.name);
                 new_tac = create_tac(TAC_PHI, stmt->data.var_decl.name, NULL, NULL, NULL, NULL);
+            } else if (stmt->data.var_decl.init_value->type == NODE_FUNCTION_CALL) {
+                // Emit param TACs for each argument
+                ASTNode *call = stmt->data.var_decl.init_value;
+                for (size_t i = 0; i < call->data.function_call.arg_count; i++) {
+                    char *arg_val = extract_node_value_as_string(call->data.function_call.args[i]);
+                    TAC *param_tac = create_tac(TAC_ASSIGN, "param", arg_val, NULL, NULL, NULL);
+                    if (*tail == NULL) {
+                        *tail = param_tac;
+                    } else {
+                        (*tail)->next = param_tac;
+                        *tail = param_tac;
+                    }
+                    free(arg_val);
+                }
+                // Handle function call initializer: x = call foo
+                new_tac = create_tac(TAC_CALL, stmt->data.var_decl.name, call->data.function_call.name, NULL, NULL, NULL);
             } else {
                 NodeValue init_value = extract_node_value(stmt->data.var_decl.init_value);
                 if (init_value.type == NODE_TYPE_LITERAL) {
@@ -330,8 +344,12 @@ static void process_statement(ASTNode *stmt, BasicBlock *block, size_t stmt_inde
             }
 
             if (new_tac) {
-                (*tail)->next = new_tac;
-                *tail = new_tac;
+                if (*tail == NULL) {
+                    *tail = new_tac;
+                } else {
+                    (*tail)->next = new_tac;
+                    *tail = new_tac;
+                }
                 LOG_INFO("Linked TAC for variable declaration: %s", stmt->data.var_decl.name);
             }
             break;
@@ -350,8 +368,12 @@ static void process_statement(ASTNode *stmt, BasicBlock *block, size_t stmt_inde
                     const char *op = operator_to_string(stmt->data.assignment.value->data.binary_op.op);
                     TAC *binary_tac = create_tac(TAC_BINARY_OP, temp_var, left_operand, right_operand, op, NULL);
 
-                    (*tail)->next = binary_tac;
-                    *tail = binary_tac;
+                    if (*tail == NULL) {
+                        *tail = binary_tac;
+                    } else {
+                        (*tail)->next = binary_tac;
+                        *tail = binary_tac;
+                    }
 
                     free(left_operand);
                     free(right_operand);
@@ -394,8 +416,12 @@ static void process_statement(ASTNode *stmt, BasicBlock *block, size_t stmt_inde
                 const char *op = operator_to_string(stmt->data.binary_op.op);
                 new_tac = create_tac(TAC_BINARY_OP, temp_var, left_operand, right_operand, op, NULL);
 
-                (*tail)->next = new_tac;
-                *tail = new_tac;
+                if (*tail == NULL) {
+                    *tail = new_tac;
+                } else {
+                    (*tail)->next = new_tac;
+                    *tail = new_tac;
+                }
 
                 LOG_INFO("Generated TAC for binary operation: %s = %s %s %s", temp_var, left_operand, op, right_operand);
 
@@ -434,8 +460,12 @@ static void process_statement(ASTNode *stmt, BasicBlock *block, size_t stmt_inde
                     const char *op = operator_to_string(stmt->data.return_stmt.value->data.binary_op.op);
                     TAC *binary_tac = create_tac(TAC_BINARY_OP, temp_var, left_operand, right_operand, op, NULL);
 
-                    (*tail)->next = binary_tac;
-                    *tail = binary_tac;
+                    if (*tail == NULL) {
+                        *tail = binary_tac;
+                    } else {
+                        (*tail)->next = binary_tac;
+                        *tail = binary_tac;
+                    }
 
                     free(left_operand);
                     free(right_operand);
@@ -457,7 +487,28 @@ static void process_statement(ASTNode *stmt, BasicBlock *block, size_t stmt_inde
             }
             break;
 
-        // dont need to process these 
+        case NODE_FUNCTION_CALL:
+            // Standalone function call (not in assignment or var_decl)
+            for (size_t i = 0; i < stmt->data.function_call.arg_count; i++) {
+                char *arg_val = extract_node_value_as_string(stmt->data.function_call.args[i]);
+                TAC *param_tac = create_tac(TAC_ASSIGN, "param", arg_val, NULL, NULL, NULL);
+                if (*tail == NULL) {
+                    *tail = param_tac;
+                } else {
+                    (*tail)->next = param_tac;
+                    *tail = param_tac;
+                }
+                free(arg_val);
+            }
+            TAC *call_tac = create_tac(TAC_CALL, NULL, stmt->data.function_call.name, NULL, NULL, NULL);
+            if (*tail == NULL) {
+                *tail = call_tac;
+            } else {
+                (*tail)->next = call_tac;
+                *tail = call_tac;
+            }
+            break;
+
         case NODE_LITERAL:
         case NODE_VAR_REF:
             break;
@@ -470,19 +521,38 @@ static void process_statement(ASTNode *stmt, BasicBlock *block, size_t stmt_inde
     if (new_tac) {
         LOG_INFO("Generated TAC: type=%d, result=%s, arg1=%s, arg2=%s, op=%s, label=%s", 
                  new_tac->type, new_tac->result, new_tac->arg1, new_tac->arg2, new_tac->op, new_tac->label);
-        (*tail)->next = new_tac;
-        *tail = new_tac;
+        if (*tail == NULL) {
+            *tail = new_tac;
+        } else {
+            (*tail)->next = new_tac;
+            *tail = new_tac;
+        }
     }
 }
 
 // Updated handling for CFG block types in TAC generation
-static void traverse_cfg(BasicBlock *block, bool *visited, TAC **head, TAC **tail) {
+static void traverse_cfg(CFG *cfg, BasicBlock *block, bool *visited, TAC **head, TAC **tail) {
     if (visited[block->id]) {
         return; // Block already visited
     }
     visited[block->id] = true;
 
-    // Retrieve the preassigned label for the block
+    // Emit a function label if this is a function entry block
+    if (block->function_name) {
+        // Emit function name as a label (e.g., main:)
+        TAC *func_label_tac = create_tac(TAC_LABEL, NULL, NULL, NULL, block->function_name, NULL);
+        if (!*head) {
+            *head = *tail = func_label_tac;
+        } else {
+            (*tail)->next = func_label_tac;
+            *tail = func_label_tac;
+        }
+        // Emit function prologue (e.g., enter N)
+        TAC *prologue_tac = create_tac(TAC_ASSIGN, "__enter", block->function_name, NULL, NULL, NULL);
+        (*tail)->next = prologue_tac;
+        *tail = prologue_tac;
+    }
+
     int label = get_block_label(block->id);
     LOG_INFO("Adding block label: L%d", label);
     TAC *label_tac = create_tac(TAC_LABEL, NULL, NULL, NULL, NULL, &label);
@@ -491,6 +561,34 @@ static void traverse_cfg(BasicBlock *block, bool *visited, TAC **head, TAC **tai
     } else {
         (*tail)->next = label_tac;
         *tail = label_tac;
+    }
+
+    LOG_DEBUG("Checking for entry block: block=%p, entry=%p, stmt_count=%zu, succ_count=%zu", (void*)block, (void*)cfg->blocks[0], (size_t)block->stmt_count, (size_t)block->succ_count);
+    // Special case: entry block is empty, emit call to main if main exists, then goto exit block
+    if (block == cfg->blocks[0] && block->stmt_count == 0 && block->succ_count > 0) {
+        LOG_DEBUG("Entry block is empty and has successors, searching for main block by function_name...");
+        size_t main_block_id = (size_t)-1;
+        for (size_t i = 0; i < cfg->block_count; i++) {
+            BasicBlock *b = cfg->blocks[i];
+            if (b->function_name && strcmp(b->function_name, "main") == 0) {
+                main_block_id = b->id;
+                LOG_DEBUG("Found main() entry block: id=%zu", main_block_id);
+                break;
+            }
+        }
+        if (main_block_id != (size_t)-1) {
+            // Emit call to main
+            TAC *call_main = create_tac(TAC_CALL, NULL, "main", NULL, NULL, NULL);
+            (*tail)->next = call_main;
+            *tail = call_main;
+            // Emit goto to exit block
+            int exit_label = get_block_label(cfg->exit->id);
+            TAC *goto_exit = create_tac(TAC_GOTO, NULL, NULL, NULL, NULL, &exit_label);
+            (*tail)->next = goto_exit;
+            *tail = goto_exit;
+        } else {
+            LOG_DEBUG("No main() function entry block found in CFG.");
+        }
     }
 
     // Handle block types for control flow
@@ -514,15 +612,23 @@ static void traverse_cfg(BasicBlock *block, bool *visited, TAC **head, TAC **tai
             int else_label = get_block_label(block->preds[0]->succs[1]->id);
             TAC *if_goto_tac = create_tac(TAC_IF_GOTO, NULL, temp_var, NULL, NULL, &else_label);
             LOG_INFO("Adding if-goto TAC for condition: L%d", else_label);
-            (*tail)->next = if_goto_tac;
-            *tail = if_goto_tac;
+            if (*tail == NULL) {
+                *tail = if_goto_tac;
+            } else {
+                (*tail)->next = if_goto_tac;
+                *tail = if_goto_tac;
+            }
         } else {
             // Add a goto to the successor block if no else block exists
             int successor_label = get_block_label(block->succs[0]->id);
             TAC *goto_tac = create_tac(TAC_GOTO, NULL, NULL, NULL, NULL, &successor_label);
             LOG_INFO("Adding goto TAC for successor block: L%d", successor_label);
-            (*tail)->next = goto_tac;
-            *tail = goto_tac;
+            if (*tail == NULL) {
+                *tail = goto_tac;
+            } else {
+                (*tail)->next = goto_tac;
+                *tail = goto_tac;
+            }
         }
     }
 
@@ -538,8 +644,12 @@ static void traverse_cfg(BasicBlock *block, bool *visited, TAC **head, TAC **tai
             if (!is_var_in_set(processed_vars, processed_vars_count, var_name)) {
                 LOG_INFO("Detected φ-function for variable: %s", var_name);
                 TAC *phi_tac = create_tac(TAC_PHI, var_name, NULL, NULL, NULL, NULL);
-                (*tail)->next = phi_tac;
-                *tail = phi_tac;
+                if (*tail == NULL) {
+                    *tail = phi_tac;
+                } else {
+                    (*tail)->next = phi_tac;
+                    *tail = phi_tac;
+                }
                 add_var_to_set(processed_vars, &processed_vars_count, 1024, var_name);
             } else {
                 LOG_INFO("Skipping duplicate φ-function for variable: %s", var_name);
@@ -560,8 +670,12 @@ static void traverse_cfg(BasicBlock *block, bool *visited, TAC **head, TAC **tai
                 int exit_label = get_block_label(block->succs[1]->id);
                 TAC *if_goto_tac = create_tac(TAC_IF_GOTO, NULL, cond_var, NULL, NULL, &exit_label);
                 LOG_INFO("Adding if-goto TAC for loop condition: L%d", exit_label);
-                (*tail)->next = if_goto_tac;
-                *tail = if_goto_tac;
+                if (*tail == NULL) {
+                    *tail = if_goto_tac;
+                } else {
+                    (*tail)->next = if_goto_tac;
+                    *tail = if_goto_tac;
+                }
             } else {
                 LOG_ERROR("Loop header: Condition variable not set in last statement");
             }
@@ -579,13 +693,24 @@ static void traverse_cfg(BasicBlock *block, bool *visited, TAC **head, TAC **tai
         int successor_label = get_block_label(block->succs[0]->id);
         TAC *goto_tac = create_tac(TAC_GOTO, NULL, NULL, NULL, NULL, &successor_label);
         LOG_INFO("Adding unconditional goto TAC for successor block: L%d", successor_label);
-        (*tail)->next = goto_tac;
-        *tail = goto_tac;
+        if (*tail == NULL) {
+            *tail = goto_tac;
+        } else {
+            (*tail)->next = goto_tac;
+            *tail = goto_tac;
+        }
     }
 
     // Recursively process successor blocks
     for (size_t i = 0; i < block->succ_count; i++) {
-        traverse_cfg(block->succs[i], visited, head, tail);
+        traverse_cfg(cfg, block->succs[i], visited, head, tail);
+    }
+
+    // Emit halt in the exit block
+    if (block->type == BLOCK_EXIT) {
+        TAC *halt_tac = create_tac(TAC_ASSIGN, "halt", NULL, NULL, NULL, NULL);
+        (*tail)->next = halt_tac;
+        *tail = halt_tac;
     }
 }
 
@@ -602,7 +727,8 @@ TAC *cfg_to_tac(CFG *cfg) {
     }
 
     preassign_block_labels(cfg);
-    traverse_cfg(cfg->blocks[0], visited, &head, &tail);
+
+    traverse_cfg(cfg, cfg->blocks[0], visited, &head, &tail);
 
     free(visited);
     free_block_label_table();
@@ -662,17 +788,23 @@ void convert_to_ssa(TAC *tac, CFG *cfg) {
     LOG_INFO("SSA conversion completed");
 }
 
-// Updated TAC printing to prepend 'L' to integer labels
+// Updated TAC printing to support function name labels and prologue/epilogue
 void print_tac(TAC *tac, FILE *stream) {
     while (tac) {
         switch (tac->type) {
             case TAC_ASSIGN:
-                if (tac->int_value != 0) {
-                    fprintf(stream, "%s = %d\n", tac->result, tac->int_value);
-                } else if (tac->ptr_value != NULL) {
-                    fprintf(stream, "%s = %p\n", tac->result, tac->ptr_value);
+                if (tac->result && strcmp(tac->result, "param") == 0) {
+                    fprintf(stream, "param %s\n", tac->arg1);
+                } else if (tac->result && strcmp(tac->result, "halt") == 0) {
+                    fprintf(stream, "halt\n");
                 } else {
-                    fprintf(stream, "%s = %s\n", tac->result, tac->arg1);
+                    if (tac->int_value != 0) {
+                        fprintf(stream, "%s = %d\n", tac->result, tac->int_value);
+                    } else if (tac->ptr_value != NULL) {
+                        fprintf(stream, "%s = %p\n", tac->result, tac->ptr_value);
+                    } else {
+                        fprintf(stream, "%s = %s\n", tac->result, tac->arg1);
+                    }
                 }
                 break;
             case TAC_BINARY_OP:
@@ -682,7 +814,12 @@ void print_tac(TAC *tac, FILE *stream) {
                 fprintf(stream, "%s = %s %s\n", tac->result, tac->op, tac->arg1);
                 break;
             case TAC_LABEL:
-                fprintf(stream, "L%d:\n", *(tac->label));
+                if (tac->op) {
+                    // Function name label
+                    fprintf(stream, "%s:\n", tac->op);
+                } else {
+                    fprintf(stream, "L%d:\n", *(tac->label));
+                }
                 break;
             case TAC_GOTO:
                 fprintf(stream, "goto L%d\n", *(tac->label));
@@ -701,6 +838,9 @@ void print_tac(TAC *tac, FILE *stream) {
                 break;
             case TAC_PHI:
                 fprintf(stream, "%s = phi(...)\n", tac->result);
+                break;
+            case TAC_CALL:
+                fprintf(stream, "%s = call %s\n", tac->result ? tac->result : "_", tac->arg1);
                 break;
             default:
                 fprintf(stream, "Unknown TAC type\n");
