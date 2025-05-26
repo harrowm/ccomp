@@ -46,6 +46,9 @@ static BasicBlock* create_basic_block(CFG *cfg, BlockType type) {
 
     block->function_name = NULL; // Initialize function_name to NULL
 
+    block->phi_vars = NULL;
+    block->phi_count = 0;
+
     LOG_INFO("Created basic block %zu of type %d", block->id, type);
     
     // Add to CFG
@@ -385,6 +388,12 @@ void free_cfg(CFG *cfg) {
             free(block->succs);
             free(block->dom_frontier);
             free(block->dominated);
+            if (block->phi_vars) {
+                for (size_t j = 0; j < block->phi_count; ++j) {
+                    free(block->phi_vars[j]);
+                }
+                free(block->phi_vars);
+            }
             free(block);
         }
     }

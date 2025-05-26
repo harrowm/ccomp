@@ -25,15 +25,16 @@ typedef struct TAC {
     char *arg1;      // First argument
     char *arg2;      // Second argument (if applicable)
     char *op;        // Operator (if applicable)
-    char *label;     // Label (if applicable)
+    int *int_label;  // Integer label (for block labels, NULL if not used)
+    char *str_label; // String label (for function names, NULL if not used)
     int int_value;   // Integer value (if applicable)
     void *ptr_value; // Pointer value (if applicable)
     struct TAC *next; // Pointer to the next TAC instruction
 } TAC;
 
 // Function declarations
-TAC *cfg_to_tac(CFG *cfg);
-void print_tac(TAC *tac, FILE *stream);
+void create_tac(CFG *cfg);
+void print_tac(CFG *cfg, FILE *stream);
 void free_tac(TAC *tac);
 
 #endif // TAC_H

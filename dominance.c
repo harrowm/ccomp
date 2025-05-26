@@ -259,12 +259,12 @@ void insert_phi_functions(CFG *cfg) {
         free(phi_blocks);
     }
 
-    // Free temp structures
+    // Assign phi_vars and phi_count to each block, and free temp structures
     for (size_t i = 0; i < cfg->block_count; i++) {
-        for (size_t j = 0; j < block_phi_var_counts[i]; j++) {
-            free(block_phi_vars[i][j]);
-        }
-        free(block_phi_vars[i]);
+        BasicBlock *block = cfg->blocks[i];
+        block->phi_vars = block_phi_vars[i];
+        block->phi_count = block_phi_var_counts[i];
+        // Do not free block_phi_vars[i] here, now owned by block
     }
     free(block_phi_vars);
     free(block_phi_var_counts);

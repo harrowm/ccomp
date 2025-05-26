@@ -60,6 +60,11 @@ typedef struct BasicBlock {
     size_t dominated_capacity;    // Capacity of the dominated array
 
     char *function_name; // Name of the function this block belongs to (set for function entry blocks)
+    struct TAC *tac_head; // Head of TAC list for this block
+    struct TAC *tac_tail; // Tail of TAC list for this block
+    // Phi function tracking (populated by insert_phi_functions)
+    char **phi_vars;
+    size_t phi_count;
 } BasicBlock;
 
 typedef struct {

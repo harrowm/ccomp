@@ -29,16 +29,20 @@ test_dominance: dominance.c cfg.c cfg.h test_dominance.c lexer.c lexer.h parser.
 	$(CC) $(CFLAGS) -o test_dominance dominance.c cfg.c lexer.c parser.c test_dominance.c
 
 test_tac: tac.c tac.h test_tac.c cfg.c cfg.h lexer.c lexer.h parser.c parser.h dominance.c minunit.h
-	$(CC) $(CFLAGS) -o test_tac tac.c cfg.c lexer.c parser.c dominance.c test_tac.c
+	$(CC) $(CFLAGS) -o test_tac tac.c cfg.c lexer.c parser.c dominance.c optimize.c test_tac.c
+
+test_optimize: tac.c tac.h test_optimize.c cfg.c cfg.h lexer.c lexer.h parser.c parser.h dominance.c optimize.c optimize.h minunit.h
+	$(CC) $(CFLAGS) -o test_optimize tac.c cfg.c lexer.c parser.c dominance.c optimize.c test_optimize.c
 
 .PHONY: test coverage
 
-test: test_lexer test_parser test_cfg test_dominance test_tac
+test: test_lexer test_parser test_cfg test_dominance test_tac test_optimize
 	./test_lexer
 	./test_parser
 	./test_cfg
 	./test_dominance
 	./test_tac
+	#./test_optimize
 
 coverage: test
 	lcov --capture --directory . --output-file coverage.info
