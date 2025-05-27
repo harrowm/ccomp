@@ -44,6 +44,12 @@ jobs:
       - name: Run dominance tests
         run: ./test_dominance
 
+      - name: Build tac tests
+        run: make test_tac
+
+      - name: Run tac tests
+        run: ./test_tac
+
       - name: Generate coverage report
         run: make coverage
 
