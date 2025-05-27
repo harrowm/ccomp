@@ -1,5 +1,0 @@
-gcc -flto -O3 -DDEBUG_LEVEL=4 -fprofile-arcs -ftest-coverage -g -o test_lexer lexer.c test_lexer.c
-gcc -flto -O3 -DDEBUG_LEVEL=4 -fprofile-arcs -ftest-coverage -g -o test_parser parser.c lexer.c test_parser.c
-gcc -flto -O3 -DDEBUG_LEVEL=4 -fprofile-arcs -ftest-coverage -g -o test_cfg cfg.c lexer.c parser.c test_cfg.c
-gcc -flto -O3 -DDEBUG_LEVEL=4 -fprofile-arcs -ftest-coverage -g -o test_dominance dominance.c cfg.c lexer.c parser.c test_dominance.c
-gcc -flto -O3 -DDEBUG_LEVEL=4 -fprofile-arcs -ftest-coverage -g -o test_tac tac.c cfg.c lexer.c parser.c dominance.c optimize.c test_tac.c

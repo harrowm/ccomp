@@ -15,7 +15,9 @@ typedef enum {
     TAC_IF_GOTO,     // if x goto label
     TAC_RETURN,      // return x
     TAC_PHI,         // x = phi(y, z)
-    TAC_CALL         // Function call
+    TAC_CALL,        // Function call
+    TAC_FN_ENTER,    // __enter = function_name
+    TAC_HALT         // halt instruction
 } TACType;
 
 // TAC instruction structure

@@ -1,64 +1,261 @@
-// Minimal SSA renaming for TAC list (single-pass, no phi insertion)
-// This does not handle control flow joins, but is enough for straight-line code and simple tests.
+
+
 #include "tac.h"
 #include <string.h>
-void tac_rename_variables_ssa(TAC *tac) {
-    typedef struct { char name[64]; int version; } VarVersion;
-    VarVersion versions[256];
-    int nvars = 0;
+#include <assert.h>
 
-    static char buf[128];
-    #define GET_VERSIONED(name, version) (snprintf(buf, sizeof(buf), "%s_%d", name, version), buf)
+// Classic SSA renaming algorithm: preorder dominator tree traversal, variable stacks
+typedef struct SSAStack {
+    char *name; // variable base name
+    int *versions;
+    size_t size, cap;
+    struct SSAStack *next;
+} SSAStack;
 
-    for (TAC *curr = tac; curr != NULL; curr = curr->next) {
-        if (curr->result && curr->type != TAC_LABEL && curr->type != TAC_PHI && curr->type != TAC_CALL) {
-            int idx = -1;
-            for (int i = 0; i < nvars; ++i) {
-                if (strcmp(versions[i].name, curr->result) == 0) { idx = i; break; }
-            }
-            if (idx == -1) {
-                idx = nvars++;
-                strncpy(versions[idx].name, curr->result, 63);
-                versions[idx].name[63] = 0;
-                versions[idx].version = 0;
-            } else {
-                versions[idx].version++;
-            }
-            free(curr->result);
-            curr->result = strdup(GET_VERSIONED(versions[idx].name, versions[idx].version));
+#define SSA_HASH_SIZE 211
+static SSAStack *ssa_table[SSA_HASH_SIZE];
+
+static size_t ssa_hash(const char *name) {
+    size_t h = 0; while (*name) h = h*31 + *name++;
+    return h % SSA_HASH_SIZE;
+}
+
+static SSAStack *ssa_get_stack(const char *name, int create) {
+    size_t idx = ssa_hash(name);
+    for (SSAStack *s = ssa_table[idx]; s; s = s->next)
+        if (strcmp(s->name, name) == 0) return s;
+    if (!create) return NULL;
+    SSAStack *s = calloc(1, sizeof(SSAStack));
+    s->name = strdup(name);
+    s->cap = 8; s->versions = malloc(sizeof(int)*s->cap);
+    s->size = 0;
+    s->next = ssa_table[idx];
+    ssa_table[idx] = s;
+    return s;
+}
+
+
+// Helper: is this TAC a definition for SSA purposes?
+#define IS_SSA_DEF(t) (\
+    ((t)->type == TAC_PHI && (t)->result) || \
+    ((t)->result && (t)->type != TAC_PHI && (t)->type != TAC_LABEL && (t)->type != TAC_FN_ENTER && (t)->type != TAC_RETURN)\
+)
+
+static void ssa_push(const char *name, int version) {
+    SSAStack *s = ssa_get_stack(name, 1);
+    if (s->size == s->cap) { s->cap *= 2; s->versions = realloc(s->versions, sizeof(int)*s->cap); }
+    s->versions[s->size++] = version;
+}
+static void ssa_pop(const char *name) {
+    SSAStack *s = ssa_get_stack(name, 0);
+    assert(s && s->size > 0);
+    s->size--;
+}
+static int ssa_peek(const char *name) {
+    SSAStack *s = ssa_get_stack(name, 0);
+    assert(s && s->size > 0);
+    return s->versions[s->size-1];
+}
+
+static void ssa_clear_table() {
+    for (int i = 0; i < SSA_HASH_SIZE; ++i) {
+        SSAStack *s = ssa_table[i];
+        while (s) {
+            SSAStack *n = s->next;
+            free(s->name); free(s->versions); free(s);
+            s = n;
         }
-        if (curr->arg1) {
-            for (int i = 0; i < nvars; ++i) {
-                size_t len = strlen(versions[i].name);
-                if (strncmp(curr->arg1, versions[i].name, len) == 0 && (curr->arg1[len] == 0 || curr->arg1[len] == '_')) {
-                    free(curr->arg1);
-                    curr->arg1 = strdup(GET_VERSIONED(versions[i].name, versions[i].version));
-                    break;
-                }
+        ssa_table[i] = NULL;
+    }
+}
+
+// Helper: get base variable name (before _)
+static void ssa_base(const char *name, char *out, size_t outlen) {
+    strncpy(out, name, outlen-1); out[outlen-1]=0;
+    char *u = strchr(out, '_'); if (u) *u=0;
+}
+
+// SSA version counter per variable (global)
+typedef struct SSAVersion {
+    char *name;
+    int version;
+    struct SSAVersion *next;
+} SSAVersion;
+#define SSA_VER_HASH_SIZE 211
+static SSAVersion *ssa_ver_table[SSA_VER_HASH_SIZE];
+static int ssa_next_version(const char *name) {
+    size_t idx = ssa_hash(name);
+    for (SSAVersion *v = ssa_ver_table[idx]; v; v = v->next)
+        if (strcmp(v->name, name) == 0) return ++v->version;
+    SSAVersion *v = calloc(1, sizeof(SSAVersion));
+    v->name = strdup(name); v->version = 0;
+    v->next = ssa_ver_table[idx];
+    ssa_ver_table[idx] = v;
+    return 0;
+}
+static void ssa_clear_versions() {
+    for (int i = 0; i < SSA_VER_HASH_SIZE; ++i) {
+        SSAVersion *v = ssa_ver_table[i];
+        while (v) { SSAVersion *n = v->next; free(v->name); free(v); v = n; }
+        ssa_ver_table[i] = NULL;
+    }
+}
+
+// Helper: format SSA name
+static char *ssa_format(const char *name, int version) {
+    char buf[128];
+    snprintf(buf, sizeof(buf), "%s_%d", name, version);
+    return strdup(buf);
+}
+
+// Main SSA renaming function (classic algorithm)
+static void ssa_rename_block(BasicBlock *block, CFG *cfg) {
+    // 1. Rename phi results and push
+    for (TAC *t = block->tac_head; t; t = t->next) {
+        if (t->type == TAC_PHI && t->result) {
+            char base[64]; ssa_base(t->result, base, sizeof(base));
+            int v = ssa_next_version(base);
+            char *newname = ssa_format(base, v);
+            free(t->result); t->result = strdup(newname);
+            ssa_push(base, v);
+            free(newname);
+        }
+    }
+    // 2. Rename uses and defs in TACs
+    for (TAC *t = block->tac_head; t; t = t->next) {
+        if (t->type == TAC_PHI) continue; // Do not rename uses for phi TACs here
+        // Rename uses (arg1, arg2)
+        if (t->arg1) {
+            char base[64]; ssa_base(t->arg1, base, sizeof(base));
+            SSAStack *s = ssa_get_stack(base, 0);
+            if (s && s->size > 0) {
+                free(t->arg1); t->arg1 = ssa_format(base, ssa_peek(base));
             }
         }
-        if (curr->arg2) {
-            for (int i = 0; i < nvars; ++i) {
-                size_t len = strlen(versions[i].name);
-                if (strncmp(curr->arg2, versions[i].name, len) == 0 && (curr->arg2[len] == 0 || curr->arg2[len] == '_')) {
-                    free(curr->arg2);
-                    curr->arg2 = strdup(GET_VERSIONED(versions[i].name, versions[i].version));
-                    break;
-                }
+        if (t->arg2) {
+            char base[64]; ssa_base(t->arg2, base, sizeof(base));
+            SSAStack *s = ssa_get_stack(base, 0);
+            if (s && s->size > 0) {
+                free(t->arg2); t->arg2 = ssa_format(base, ssa_peek(base));
             }
         }
-        if (curr->type == TAC_RETURN && curr->result) {
-            for (int i = 0; i < nvars; ++i) {
-                size_t len = strlen(versions[i].name);
-                if (strncmp(curr->result, versions[i].name, len) == 0 && (curr->result[len] == 0 || curr->result[len] == '_')) {
-                    free(curr->result);
-                    curr->result = strdup(GET_VERSIONED(versions[i].name, versions[i].version));
-                    break;
-                }
+        // Rename defs (result)
+        if (IS_SSA_DEF(t) && t->type != TAC_PHI) {
+            char base[64]; ssa_base(t->result, base, sizeof(base));
+            int v = ssa_next_version(base);
+            char *newname = ssa_format(base, v);
+            free(t->result); t->result = strdup(newname);
+            ssa_push(base, v);
+            free(newname);
+        }
+        // For TAC_RETURN, treat result as a use, not a def
+        if (t->type == TAC_RETURN && t->result) {
+            char base[64]; ssa_base(t->result, base, sizeof(base));
+            SSAStack *s = ssa_get_stack(base, 0);
+            if (s && s->size > 0) {
+                free(t->result); t->result = ssa_format(base, ssa_peek(base));
             }
         }
     }
-    #undef GET_VERSIONED
+
+    // 3. For each successor, update phi args for this pred (after renaming this block, before popping)
+    for (size_t i = 0; i < block->succ_count; ++i) {
+        BasicBlock *succ = block->succs[i];
+        // Find our index in the successor's preds
+        size_t pred_idx = 0;
+        for (size_t k = 0; k < succ->pred_count; ++k) {
+            if (succ->preds[k] == block) { pred_idx = k; break; }
+        }
+        LOG_DEBUG("[SSA] Block %zu updating phi args in successor block %zu (pred_idx=%zu)", block->id, succ->id, pred_idx);
+        for (TAC *t = succ->tac_head; t; t = t->next) {
+            if (t->type == TAC_PHI && t->result) {
+                char base[64]; ssa_base(t->result, base, sizeof(base));
+                SSAStack *s = ssa_get_stack(base, 0);
+                int ssa_version = s && s->size > 0 ? ssa_peek(base) : -1;
+                char *arg = ssa_version >= 0 ? ssa_format(base, ssa_version) : strdup(base);
+                LOG_DEBUG("[SSA]   Phi result %s (base %s): using version %d for pred %zu (arg=%s)", t->result, base, ssa_version, block->id, arg);
+                // Build or update the arg1 list
+                size_t nargs = succ->pred_count;
+                char **args = calloc(nargs, sizeof(char*));
+                // If arg1 exists, parse it
+                if (t->arg1) {
+                    char *tmp = strdup(t->arg1);
+                    char *tok = strtok(tmp, ",");
+                    for (size_t a = 0; a < nargs && tok; ++a) {
+                        args[a] = strdup(tok); tok = strtok(NULL, ",");
+                    }
+                    free(tmp);
+                }
+                // Set our slot
+                if (args[pred_idx]) free(args[pred_idx]);
+                args[pred_idx] = arg;
+                // Rebuild arg1
+                size_t total = 0; for (size_t a = 0; a < nargs; ++a) total += args[a]?strlen(args[a]):0;
+                char *all = malloc(total + nargs + 1); all[0]=0;
+                for (size_t a = 0; a < nargs; ++a) {
+                    if (args[a]) strcat(all, args[a]);
+                    if (a+1 < nargs) strcat(all, ",");
+                }
+                if (t->arg1) free(t->arg1); t->arg1 = all;
+                for (size_t a = 0; a < nargs; ++a) if (args[a]) free(args[a]);
+                free(args);
+                LOG_DEBUG("[SSA]   Updated phi %s in block %zu: arg1 now '%s'", t->result, succ->id, t->arg1);
+            }
+        }
+    }
+
+    // 4. Recurse on dominated children
+    for (size_t i = 0; i < block->dominated_count; ++i) {
+        if (block->dominated[i] == block) {
+            // Defensive: skip self-recursion
+            fprintf(stderr, "Warning: block %zu dominates itself, skipping recursion\n", block->id);
+            continue;
+        }
+        ssa_rename_block(block->dominated[i], cfg);
+    }
+    // 5. Pop names defined in this block (phi and assignments), as many times as defined per base
+    typedef struct { char *base; int count; } BaseCount;
+    size_t base_cap = 8, base_count = 0;
+    BaseCount *base_counts = malloc(sizeof(BaseCount) * base_cap);
+    for (TAC *t = block->tac_head; t; t = t->next) {
+        if (IS_SSA_DEF(t)) {
+            char base[64]; ssa_base(t->result, base, sizeof(base));
+            int found = 0;
+            for (size_t i = 0; i < base_count; ++i) {
+                if (strcmp(base_counts[i].base, base) == 0) {
+                    base_counts[i].count++;
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found) {
+                if (base_count == base_cap) {
+                    base_cap *= 2;
+                    base_counts = realloc(base_counts, sizeof(BaseCount) * base_cap);
+                }
+                base_counts[base_count].base = strdup(base);
+                base_counts[base_count].count = 1;
+                base_count++;
+            }
+        }
+    }
+    for (size_t i = 0; i < base_count; ++i) {
+        for (int j = 0; j < base_counts[i].count; ++j) {
+            ssa_pop(base_counts[i].base);
+        }
+        free(base_counts[i].base);
+    }
+    free(base_counts);
+}
+
+// Entry point for SSA renaming
+void convert_to_ssa(CFG *cfg) {
+    ssa_clear_table();
+    ssa_clear_versions();
+    if (cfg->entry)
+        ssa_rename_block(cfg->entry, cfg);
+    ssa_clear_table();
+    ssa_clear_versions();
 }
 
 #include "tac.h"
@@ -445,9 +642,8 @@ static void process_statement(ASTNode *stmt, BasicBlock *block, size_t stmt_inde
                     free(left_operand);
                     free(right_operand);
 
-                    // Instead of assigning to x here, assign to temp in then/else blocks
-                    // new_tac = make_tac(TAC_ASSIGN, stmt->data.assignment.name, temp_var, NULL, NULL, NULL);
-                    // Do not emit assignment to x here; let phi handle merge in join block
+                    // Emit assignment to the target variable from the temp
+                    new_tac = make_tac(TAC_ASSIGN, stmt->data.assignment.name, temp_var, NULL, NULL, NULL);
                 } else {
                     NodeValue assign_value = extract_node_value(stmt->data.assignment.value);
                     if (assign_value.type == NODE_TYPE_LITERAL) {
@@ -616,7 +812,7 @@ static void traverse_cfg(CFG *cfg, BasicBlock *block, bool *visited, TAC **head,
             block->tac_tail->next = func_label_tac;
             block->tac_tail = func_label_tac;
         }
-        TAC *prologue_tac = make_tac(TAC_ASSIGN, "__enter", block->function_name, NULL, NULL, NULL);
+        TAC *prologue_tac = make_tac(TAC_FN_ENTER, "__enter", block->function_name, NULL, NULL, NULL);
         block->tac_tail->next = prologue_tac;
         block->tac_tail = prologue_tac;
     }
@@ -758,7 +954,7 @@ static void traverse_cfg(CFG *cfg, BasicBlock *block, bool *visited, TAC **head,
 
     // Emit halt in the exit block
     if (block->type == BLOCK_EXIT) {
-        TAC *halt_tac = make_tac(TAC_ASSIGN, "halt", NULL, NULL, NULL, NULL);
+        TAC *halt_tac = make_tac(TAC_HALT, NULL, NULL, NULL, NULL, NULL);
         if (block->tac_tail == NULL) {
             block->tac_head = block->tac_tail = halt_tac;
         } else {
@@ -783,7 +979,7 @@ void create_tac(CFG *cfg) {
         if (block->function_name) {
             TAC *func_label_tac = make_tac(TAC_LABEL, NULL, NULL, NULL, block->function_name, NULL);
             block->tac_head = block->tac_tail = func_label_tac;
-            TAC *prologue_tac = make_tac(TAC_ASSIGN, "__enter", block->function_name, NULL, NULL, NULL);
+            TAC *prologue_tac = make_tac(TAC_FN_ENTER, block->function_name, NULL, NULL, NULL, NULL);
             block->tac_tail->next = prologue_tac;
             block->tac_tail = prologue_tac;
         }
@@ -820,11 +1016,17 @@ void create_tac(CFG *cfg) {
             continue;
         }
 
-        // Emit phi functions at top of join/merge blocks (only once per variable)
-        if (block->type == BLOCK_NORMAL && block->pred_count > 1 && block->phi_count > 0) {
+
+
+        // --- Emit phi TACs for join blocks and loop headers immediately after label/prologue ---
+        int is_join = (block->type == BLOCK_NORMAL && block->pred_count > 1 && block->phi_count > 0);
+        int is_loop_header = (block->type == BLOCK_LOOP_HEADER && block->pred_count > 1 && block->phi_count > 0);
+
+        if (is_join || is_loop_header) {
+            // Insert phi TACs directly after the last label/prologue TAC
+            TAC *insert_after = block->tac_tail;
             for (size_t k = 0; k < block->phi_count; ++k) {
                 const char *var_name = block->phi_vars[k];
-                // Only emit phi if not already present in TAC for this block
                 int already_emitted = 0;
                 for (TAC *t = block->tac_head; t != NULL; t = t->next) {
                     if (t->type == TAC_PHI && t->result && strcmp(t->result, var_name) == 0) {
@@ -834,52 +1036,17 @@ void create_tac(CFG *cfg) {
                 }
                 if (!already_emitted) {
                     TAC *phi_tac = make_tac(TAC_PHI, var_name, NULL, NULL, NULL, NULL);
-                    if (block->tac_tail == NULL) {
-                        block->tac_head = block->tac_tail = phi_tac;
-                    } else {
-                        block->tac_tail->next = phi_tac;
-                        block->tac_tail = phi_tac;
-                    }
+                    // Insert after insert_after
+                    phi_tac->next = insert_after->next;
+                    insert_after->next = phi_tac;
+                    if (block->tac_tail == insert_after) block->tac_tail = phi_tac;
+                    insert_after = phi_tac;
                 }
             }
         }
-
-        // Remove duplicate phi TACs (keep only the first for each variable)
-        if (block->type == BLOCK_NORMAL && block->pred_count > 1 && block->phi_count > 0) {
-            TAC *prev = NULL, *curr = block->tac_head;
-            while (curr) {
-                if (curr->type == TAC_PHI) {
-                    // Check for duplicate phi for same variable later in the list
-                    TAC *runner = curr->next, *runner_prev = curr;
-                    while (runner) {
-                        if (runner->type == TAC_PHI && runner->result && curr->result && strcmp(runner->result, curr->result) == 0) {
-                            // Remove runner
-                            runner_prev->next = runner->next;
-                            if (runner == block->tac_tail) block->tac_tail = runner_prev;
-                            free(runner->result); free(runner->arg1); free(runner->arg2); free(runner->op);
-                            if (runner->int_label) free(runner->int_label);
-                            if (runner->str_label) free(runner->str_label);
-                            TAC *to_free = runner;
-                            runner = runner->next;
-                            free(to_free);
-                        } else {
-                            runner_prev = runner;
-                            runner = runner->next;
-                        }
-                    }
-                }
-                prev = curr;
-                curr = curr->next;
-            }
-        }
-
-
-
-        // Emit statements for this block
+        // Emit all statements in order
         for (size_t j = 0; j < block->stmt_count; j++) {
-            ASTNode *stmt = block->stmts[j];
-            process_statement(stmt, block, j);
-            // No need to update tac_tail here; process_statement maintains it.
+            process_statement(block->stmts[j], block, j);
         }
 
         // Emit if/else as: if (cond) goto then; goto else;
@@ -915,177 +1082,107 @@ void create_tac(CFG *cfg) {
 
         // Emit halt in the exit block
         if (block->type == BLOCK_EXIT) {
-            TAC *halt_tac = make_tac(TAC_ASSIGN, "halt", NULL, NULL, NULL, NULL);
+            TAC *halt_tac = make_tac(TAC_HALT, NULL, NULL, NULL, NULL, NULL);
             block->tac_tail->next = halt_tac;
             block->tac_tail = halt_tac;
         }
     }
-
     free_block_label_table();
     LOG_INFO("CFG to TAC conversion completed");
 }
 
-static void rename_variables_in_ssa(TAC *tac, CFG *cfg) {
-    LOG_INFO("Renaming variables in SSA format");
-    for (size_t i = 0; i < cfg->block_count; i++) {
-        BasicBlock *block = cfg->blocks[i];
-        for (size_t j = 0; j < block->stmt_count; j++) {
-            ASTNode *stmt = block->stmts[j];
-            if (stmt->type == NODE_VAR_DECL || stmt->type == NODE_ASSIGNMENT) {
-                const char *var_name = stmt->data.var_decl.name;
-                int new_version = peek_var_version(var_name) + 1;
-                push_var_version(var_name, new_version);
-                char new_var_name[64];
-                snprintf(new_var_name, sizeof(new_var_name), "%s_%d", var_name, new_version);
-                stmt->data.var_decl.name = strdup(new_var_name);
-            }
-        }
-    }
-}
 
-static void patch_phi_functions(TAC *tac, CFG *cfg) {
-    LOG_INFO("Patching φ-functions");
-    // For each phi node in the TAC list, patch its arguments with SSA names from predecessors
-    for (TAC *phi = tac; phi != NULL; phi = phi->next) {
-        if (phi->type != TAC_PHI || !phi->result) continue;
-        // Find the block this phi belongs to
-        BasicBlock *block = NULL;
-        for (size_t i = 0; i < cfg->block_count; i++) {
-            for (size_t j = 0; j < cfg->blocks[i]->stmt_count; j++) {
-                ASTNode *stmt = cfg->blocks[i]->stmts[j];
-                if (stmt->type == NODE_VAR_DECL && stmt->data.var_decl.name && strcmp(stmt->data.var_decl.name, phi->result) == 0) {
-                    block = cfg->blocks[i];
-                    break;
-                }
-            }
-            if (block) break;
-        }
-        if (!block) continue;
-        // For each predecessor, find the last assignment to this variable in that pred's TACs
-        char **phi_args = calloc(block->pred_count, sizeof(char*));
-        for (size_t k = 0; k < block->pred_count; k++) {
-            BasicBlock *pred = block->preds[k];
-            char base[64];
-            strncpy(base, phi->result, sizeof(base));
-            char *uscore = strrchr(base, '_');
-            if (uscore) *uscore = 0;
-            char *ssa_name = NULL;
-            for (TAC *t = pred->tac_head; t != NULL; t = t->next) {
-                if (t->result && strncmp(t->result, base, strlen(base)) == 0 && t->result[strlen(base)] == '_' && t->type == TAC_ASSIGN) {
-                    ssa_name = t->result;
-                }
-            }
-            if (ssa_name) phi_args[k] = strdup(ssa_name);
-            else phi_args[k] = strdup(phi->result); // fallback
-        }
-        // Free any previous args
-        if (phi->arg1) { free(phi->arg1); phi->arg1 = NULL; }
-        if (phi->arg2) { free(phi->arg2); phi->arg2 = NULL; }
-        // Concatenate all phi args into a comma-separated string for arg1
-        size_t total_len = 0;
-        for (size_t k = 0; k < block->pred_count; k++) total_len += strlen(phi_args[k]) + 2;
-        char *all_args = malloc(total_len + 1);
-        all_args[0] = 0;
-        for (size_t k = 0; k < block->pred_count; k++) {
-            strcat(all_args, phi_args[k]);
-            if (k + 1 < block->pred_count) strcat(all_args, ",");
-        }
-        phi->arg1 = all_args;
-        // Clean up
-        for (size_t k = 0; k < block->pred_count; k++) free(phi_args[k]);
-        free(phi_args);
-    }
-}
 
-// Convert TAC to SSA
-// SSA conversion for TAC: just do variable renaming for now
-void convert_to_ssa(TAC *tac, CFG *cfg) {
-    tac_rename_variables_ssa(tac);
-    patch_phi_functions(tac, cfg);
-}
 
-// Print TACs for a single basic block, including the block label as in the test expectations
+
+
+// Print all TAC instructions in a basic block
 void print_tac_bb(BasicBlock *block, FILE *stream) {
-    // Print the block label as in the test expectations
-    const char *block_type_str = NULL;
-    switch (block->type) {
-        case BLOCK_ENTRY: block_type_str = "Entry Block"; break;
-        case BLOCK_EXIT: block_type_str = "Exit Block"; break;
-        case BLOCK_IF_THEN: block_type_str = "If-Then Block"; break;
-        case BLOCK_IF_ELSE: block_type_str = "If-Else Block"; break;
-        case BLOCK_LOOP_HEADER: block_type_str = "Loop Header Block"; break;
-        case BLOCK_LOOP_BODY: block_type_str = "Loop Body Block"; break;
-        case BLOCK_NORMAL: block_type_str = "Normal Block"; break;
-        default: block_type_str = "Unknown Block Type"; break;
-    }
-    fprintf(stream, "# BasicBlock %zu (%s)\n", block->id, block_type_str);
-
+    if (!block) return;
     TAC *tac = block->tac_head;
     while (tac) {
         switch (tac->type) {
+            case TAC_LABEL:
+                if (tac->str_label)
+                    fprintf(stream, "%s:\n", tac->str_label);
+                else if (tac->int_label)
+                    fprintf(stream, "L%d:\n", *tac->int_label);
+                break;
             case TAC_ASSIGN:
-                if (tac->result && strcmp(tac->result, "param") == 0) {
-                    fprintf(stream, "param %s\n", tac->arg1);
-                } else if (tac->result && strcmp(tac->result, "halt") == 0) {
-                    fprintf(stream, "halt\n");
-                } else {
-                    if (tac->int_value != 0) {
-                        fprintf(stream, "%s = %d\n", tac->result, tac->int_value);
-                    } else if (tac->ptr_value != NULL) {
-                        fprintf(stream, "%s = %p\n", tac->result, tac->ptr_value);
-                    } else {
-                        fprintf(stream, "%s = %s\n", tac->result, tac->arg1);
-                    }
-                }
+                if (tac->result && tac->arg1)
+                    fprintf(stream, "%s = %s\n", tac->result, tac->arg1);
+                else if (tac->result && tac->arg1 == NULL && tac->int_value != 0)
+                    fprintf(stream, "%s = %d\n", tac->result, tac->int_value);
+                else if (tac->result)
+                    fprintf(stream, "%s\n", tac->result);
+                break;
+            case TAC_FN_ENTER:
+                if (tac->result)
+                    fprintf(stream, "__enter = %s\n", tac->result);
                 break;
             case TAC_BINARY_OP:
-                fprintf(stream, "%s = %s %s %s\n", tac->result, tac->arg1, tac->op, tac->arg2);
+                if (tac->result && tac->arg1 && tac->arg2 && tac->op)
+                    fprintf(stream, "%s = %s %s %s\n", tac->result, tac->arg1, tac->op, tac->arg2);
                 break;
             case TAC_UNARY_OP:
-                fprintf(stream, "%s = %s %s\n", tac->result, tac->op, tac->arg1);
-                break;
-            case TAC_LABEL:
-                if (tac->str_label) {
-                    fprintf(stream, "%s:\n", tac->str_label);
-                } else if (tac->int_label) {
-                    fprintf(stream, "L%d:\n", *(tac->int_label));
-                }
+                if (tac->result && tac->arg1 && tac->op)
+                    fprintf(stream, "%s = %s%s\n", tac->result, tac->op, tac->arg1);
                 break;
             case TAC_GOTO:
                 if (tac->int_label)
-                    fprintf(stream, "goto L%d\n", *(tac->int_label));
+                    fprintf(stream, "goto L%d\n", *tac->int_label);
                 break;
             case TAC_IF_GOTO:
-                if (tac->int_label)
-                    fprintf(stream, "if not %s goto L%d\n", tac->arg1, *(tac->int_label));
+                if (tac->arg1 && tac->int_label)
+                    fprintf(stream, "if not %s goto L%d\n", tac->arg1, *tac->int_label);
                 break;
             case TAC_RETURN:
-                if (tac->result == NULL) {
-                    fprintf(stream, "return %d\n", tac->int_value);
-                } else if (tac->ptr_value != NULL) {
-                    fprintf(stream, "return %p\n", tac->ptr_value);
-                } else {
+                if (tac->result)
                     fprintf(stream, "return %s\n", tac->result);
-                }
+                else if (tac->int_value != 0)
+                    fprintf(stream, "return %d\n", tac->int_value);
+                else
+                    fprintf(stream, "return\n");
                 break;
             case TAC_PHI:
-                fprintf(stream, "%s = phi(%s)\n", tac->result, tac->arg1 ? tac->arg1 : "...");
+                if (tac->result) {
+                    // Print the phi with the correct number of arguments, using the SSA names from arg1
+                    // If arg1 is missing or empty, print ...
+                    if (tac->arg1 && tac->arg1[0] != '\0') {
+                        fprintf(stream, "%s = phi(%s)\n", tac->result, tac->arg1);
+                    } else {
+                        fprintf(stream, "%s = phi(...)\n", tac->result);
+                    }
+                }
                 break;
             case TAC_CALL:
-                fprintf(stream, "%s = call %s\n", tac->result ? tac->result : "_", tac->arg1);
+                if (tac->result && tac->arg1)
+                    fprintf(stream, "%s = call %s\n", tac->result, tac->arg1);
+                else if (tac->arg1)
+                    fprintf(stream, "call %s\n", tac->arg1);
+                break;
+            case TAC_HALT:
+                fprintf(stream, "halt\n");
                 break;
             default:
-                fprintf(stream, "Unknown TAC type\n");
+                fprintf(stream, ";; unknown TAC type %d\n", tac->type);
                 break;
         }
         tac = tac->next;
     }
 }
 
+
 // Print TACs for each basic block in the CFG
 void print_tac(CFG *cfg, FILE *stream) {
     for (size_t i = 0; i < cfg->block_count; i++) {
         BasicBlock *block = cfg->blocks[i];
+        // Print block header
+        fprintf(stream, "# BasicBlock %zu (", block->id);
+        // Use block_type_to_string for block type printing
+        extern const char* block_type_to_string(BlockType type);
+        fprintf(stream, "%s", block_type_to_string(block->type));
+        fprintf(stream, ")\n");
         print_tac_bb(block, stream);
         fprintf(stream, "\n");
     }

@@ -156,6 +156,61 @@ static void add_phi_var(char ***block_phi_vars, size_t *block_phi_var_count, siz
 
 // Insert φ-functions into the appropriate blocks based on dominance frontiers
 void insert_phi_functions(CFG *cfg) {
+    // --- Ensure phi at loop headers for variables assigned in any predecessor (including loop body) ---
+    for (size_t i = 0; i < cfg->block_count; i++) {
+        BasicBlock *header = cfg->blocks[i];
+        if (header->type == BLOCK_LOOP_HEADER && header->pred_count > 1) {
+            LOG_INFO("[PHI-LOOP] Considering loop header block %zu with %zu preds", header->id, header->pred_count);
+            // Collect all variables assigned in any predecessor
+            char **vars = NULL;
+            size_t vars_count = 0, vars_cap = 0;
+            for (size_t p = 0; p < header->pred_count; ++p) {
+                BasicBlock *pred = header->preds[p];
+                LOG_INFO("[PHI-LOOP]   Pred %zu has %zu stmts", pred->id, pred->stmt_count);
+                for (size_t j = 0; j < pred->stmt_count; ++j) {
+                    ASTNode *stmt = pred->stmts[j];
+                    const char *var_name = NULL;
+                    if (stmt->type == NODE_VAR_DECL) {
+                        var_name = stmt->data.var_decl.name;
+                    } else if (stmt->type == NODE_ASSIGNMENT) {
+                        var_name = stmt->data.assignment.name;
+                    }
+                    if (var_name) {
+                        LOG_INFO("[PHI-LOOP]     Found var assignment: %s", var_name);
+                        int found = 0;
+                        for (size_t k = 0; k < vars_count; ++k) {
+                            if (strcmp(vars[k], var_name) == 0) { found = 1; break; }
+                        }
+                        if (!found) {
+                            if (vars_count == vars_cap) {
+                                size_t new_cap = vars_cap ? vars_cap * 2 : 4;
+                                vars = realloc(vars, new_cap * sizeof(char*));
+                                vars_cap = new_cap;
+                            }
+                            vars[vars_count++] = strdup(var_name);
+                            LOG_INFO("[PHI-LOOP]     Added to phi candidate set: %s", var_name);
+                        }
+                    }
+                }
+            }
+            // Insert phi for each such variable if not already present
+            for (size_t v = 0; v < vars_count; ++v) {
+                LOG_INFO("[PHI-LOOP]   Considering phi for var %s in header %zu", vars[v], header->id);
+                if (!has_phi_var(header->phi_vars, header->phi_count, vars[v])) {
+                    LOG_INFO("[PHI-LOOP]   Inserting phi for var %s in header %zu", vars[v], header->id);
+                    // Add phi for this variable at the loop header
+                    size_t new_count = header->phi_count + 1;
+                    header->phi_vars = realloc(header->phi_vars, new_count * sizeof(char*));
+                    header->phi_vars[header->phi_count] = strdup(vars[v]);
+                    header->phi_count = new_count;
+                } else {
+                    LOG_INFO("[PHI-LOOP]   Phi for var %s already present in header %zu", vars[v], header->id);
+                }
+                free(vars[v]);
+            }
+            free(vars);
+        }
+    }
     if (!cfg) return;
 
     LOG_INFO("Starting phi-function insertion");
